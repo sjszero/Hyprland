@@ -9,7 +9,14 @@ static bool validManifestName(const std::string_view& n) {
 }
 
 CManifest::CManifest(const eManifestType type, const std::string& path) {
-    auto manifest = toml::parse_file(path);
+    toml::table manifest;
+
+    try {
+        manifest = toml::parse_file(path);
+    } catch (const toml::parse_error&) {
+        m_good = false;
+        return;
+    }
 
     if (type == MANIFEST_HYPRLOAD) {
         for (auto const& [key, val] : manifest) {
@@ -71,7 +78,7 @@ CManifest::CManifest(const eManifestType type, const std::string& path) {
             for (auto&& pin : *pins) {
                 auto pinArr = pin.as_array();
                 if (pinArr && pinArr->get(1))
-                    m_repository.commitPins.push_back(std::make_pair<>(pinArr->get(0)->as_string()->get(), pinArr->get(1)->as_string()->get()));
+                    m_repository.commitPins.emplace_back(pinArr->get(0)->as_string()->get(), pinArr->get(1)->as_string()->get());
             }
         }
 

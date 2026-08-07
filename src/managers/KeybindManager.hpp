@@ -15,6 +15,10 @@ class CInputManager;
 class CPluginSystem;
 class IKeyboard;
 
+namespace Pointer {
+    class CPointerManager;
+}
+
 enum eMouseBindMode : int8_t;
 
 struct SSubmap {
@@ -28,34 +32,35 @@ struct SSubmap {
 using KeybindKey = std::pair<xkb_keysym_t, xkb_keycode_t>;
 
 struct SKeybind {
-    std::string                     key             = "";
-    std::vector<KeybindKey>         sMkKeys         = {};
-    uint32_t                        keycode         = 0;
-    bool                            catchAll        = false;
-    uint32_t                        modmask         = 0;
-    std::vector<KeybindKey>         sMkMods         = {};
-    std::string                     handler         = "";
-    std::string                     arg             = "";
-    bool                            locked          = false;
-    SSubmap                         submap          = {};
-    std::string                     description     = "";
-    bool                            release         = false;
-    bool                            repeat          = false;
-    bool                            longPress       = false;
-    bool                            mouse           = false;
-    bool                            nonConsuming    = false;
-    bool                            autoConsuming   = false;
-    bool                            transparent     = false;
-    bool                            ignoreMods      = false;
-    bool                            multiKey        = false;
-    bool                            hasDescription  = false;
-    bool                            dontInhibit     = false;
-    bool                            click           = false;
-    bool                            drag            = false;
-    bool                            submapUniversal = false;
-    bool                            deviceInclusive = false;
-    std::unordered_set<std::string> devices         = {};
-    bool                            enabled         = true;
+    std::string                     key               = "";
+    std::vector<KeybindKey>         sMkKeys           = {};
+    uint32_t                        keycode           = 0;
+    bool                            catchAll          = false;
+    uint32_t                        modmask           = 0;
+    std::vector<KeybindKey>         sMkMods           = {};
+    std::string                     handler           = "";
+    std::string                     arg               = "";
+    bool                            locked            = false;
+    SSubmap                         submap            = {};
+    std::string                     description       = "";
+    bool                            release           = false;
+    bool                            repeat            = false;
+    bool                            longPress         = false;
+    bool                            mouse             = false;
+    bool                            nonConsuming      = false;
+    bool                            autoConsuming     = false;
+    bool                            transparent       = false;
+    bool                            ignoreMods        = false;
+    bool                            multiKey          = false;
+    bool                            hasDescription    = false;
+    bool                            dontInhibit       = false;
+    bool                            click             = false;
+    bool                            drag              = false;
+    bool                            submapUniversal   = false;
+    bool                            deviceInclusive   = false;
+    std::unordered_set<std::string> devices           = {};
+    bool                            allowInputCapture = false;
+    bool                            enabled           = true;
 
     std::string                     displayKey = "";
 
@@ -70,6 +75,7 @@ enum eFocusWindowMode : uint8_t {
     MODE_TITLE_REGEX,
     MODE_INITIAL_TITLE_REGEX,
     MODE_TAG_REGEX,
+    MODE_STABLE_ID,
     MODE_ADDRESS,
     MODE_PID,
     MODE_ACTIVE_WINDOW
@@ -97,10 +103,6 @@ enum eMultiKeyCase : uint8_t {
     MK_FULL_MATCH
 };
 
-namespace Config::Legacy {
-    class CConfigManager;
-}
-
 namespace Config::Lua {
     class CConfigManager;
 }
@@ -110,30 +112,29 @@ class CKeybindManager {
     CKeybindManager();
     ~CKeybindManager();
 
-    bool                                                                         onKeyEvent(std::any, SP<IKeyboard>);
-    bool                                                                         onAxisEvent(const IPointer::SAxisEvent&, SP<IPointer>);
-    bool                                                                         onMouseEvent(const IPointer::SButtonEvent&, SP<IPointer>);
-    void                                                                         resizeWithBorder(const IPointer::SButtonEvent&);
-    void                                                                         onSwitchEvent(const std::string&);
-    void                                                                         onSwitchOnEvent(const std::string&);
-    void                                                                         onSwitchOffEvent(const std::string&);
+    bool                      onKeyEvent(std::any, SP<IKeyboard>);
+    bool                      onAxisEvent(const IPointer::SAxisEvent&, SP<IPointer>);
+    bool                      onMouseEvent(const IPointer::SButtonEvent&, SP<IPointer>);
+    void                      resizeWithBorder(const IPointer::SButtonEvent&);
+    void                      onSwitchEvent(const std::string&);
+    void                      onSwitchOnEvent(const std::string&);
+    void                      onSwitchOffEvent(const std::string&);
 
-    SP<SKeybind>                                                                 addKeybind(SKeybind);
-    void                                                                         removeKeybind(uint32_t, const SParsedKey&);
-    void                                                                         removeKeybind(const std::string& displayKeys);
-    uint32_t                                                                     stringToModMask(std::string);
-    uint32_t                                                                     keycodeToModifier(xkb_keycode_t);
-    void                                                                         clearKeybinds();
-    void                                                                         shadowKeybinds(const xkb_keysym_t& doesntHave = 0, const uint32_t doesntHaveCode = 0);
-    SSubmap                                                                      getCurrentSubmap();
+    SP<SKeybind>              addKeybind(SKeybind);
+    void                      removeKeybind(uint32_t, const SParsedKey&);
+    void                      removeKeybind(const std::string& displayKeys);
+    uint32_t                  stringToModMask(std::string);
+    uint32_t                  keycodeToModifier(xkb_keycode_t);
+    SP<SKeybind>              findConflictingKeybind(xkb_keysym_t keysym, uint32_t modmask);
+    void                      clearKeybinds();
+    void                      shadowKeybinds(const xkb_keysym_t& doesntHave = 0, const uint32_t doesntHaveCode = 0);
+    SSubmap                   getCurrentSubmap();
 
-    std::unordered_map<std::string, std::function<SDispatchResult(std::string)>> m_dispatchers;
+    bool                      m_groupsLocked = false;
 
-    bool                                                                         m_groupsLocked = false;
+    std::vector<SP<SKeybind>> m_keybinds;
 
-    std::vector<SP<SKeybind>>                                                    m_keybinds;
-
-    SP<SKeybind>                                                                 m_currentKeybind;
+    SP<SKeybind>              m_currentKeybind;
 
     //since we can't find keycode through keyname in xkb:
     //on sendshortcut call, we once search for keyname (e.g. "g") the correct keycode (e.g. 42)
@@ -143,41 +144,42 @@ class CKeybindManager {
 
     static SDispatchResult                         changeMouseBindMode(const eMouseBindMode mode);
 
+    std::vector<SPressedKeyWithMods>               m_pressedKeys;
+
   private:
-    std::vector<SPressedKeyWithMods> m_pressedKeys;
+    std::vector<WP<SKeybind>> m_activeKeybinds;
+    WP<SKeybind>              m_lastLongPressKeybind;
 
-    std::vector<WP<SKeybind>>        m_activeKeybinds;
-    WP<SKeybind>                     m_lastLongPressKeybind;
+    SP<CEventLoopTimer>       m_longPressTimer;
+    SP<CEventLoopTimer>       m_repeatKeyTimer;
+    uint32_t                  m_repeatKeyRate = 50;
 
-    SP<CEventLoopTimer>              m_longPressTimer;
-    SP<CEventLoopTimer>              m_repeatKeyTimer;
-    uint32_t                         m_repeatKeyRate = 50;
+    std::vector<WP<SKeybind>> m_pressedSpecialBinds;
 
-    std::vector<WP<SKeybind>>        m_pressedSpecialBinds;
+    CTimer                    m_scrollTimer;
 
-    CTimer                           m_scrollTimer;
+    SDispatchResult           handleKeybinds(const uint32_t, const SPressedKeyWithMods&, bool, SP<IKeyboard>, SP<IHID>);
 
-    SDispatchResult                  handleKeybinds(const uint32_t, const SPressedKeyWithMods&, bool, SP<IKeyboard>, SP<IHID>);
+    std::set<KeybindKey>      m_mkKeys = {};
+    std::set<KeybindKey>      m_mkMods = {};
+    eMultiKeyCase             mkBindMatches(const SP<SKeybind>);
+    eMultiKeyCase             mkKeysymSetMatches(const std::vector<KeybindKey>&, const std::set<KeybindKey>&);
 
-    std::set<KeybindKey>             m_mkKeys = {};
-    std::set<KeybindKey>             m_mkMods = {};
-    eMultiKeyCase                    mkBindMatches(const SP<SKeybind>);
-    eMultiKeyCase                    mkKeysymSetMatches(const std::vector<KeybindKey>&, const std::set<KeybindKey>&);
+    bool                      handleInternalKeybinds(xkb_keysym_t);
+    bool                      handleVT(xkb_keysym_t);
 
-    bool                             handleInternalKeybinds(xkb_keysym_t);
-    bool                             handleVT(xkb_keysym_t);
+    xkb_state*                m_xkbTranslationState = nullptr;
 
-    xkb_state*                       m_xkbTranslationState = nullptr;
-
-    void                             updateXKBTranslationState();
-    bool                             ensureMouseBindState();
+    void                      updateXKBTranslationState();
+    bool                      ensureMouseBindState();
+    void                      callBindDispatcher(const SP<SKeybind>);
+    static SDispatchResult    releaseInputCapture(std::string);
 
     friend class CCompositor;
     friend class CInputManager;
-    friend class Config::Legacy::CConfigManager;
     friend class Config::Lua::CConfigManager;
     friend class CWorkspace;
-    friend class CPointerManager;
+    friend class Pointer::CPointerManager;
 };
 
 inline UP<CKeybindManager> g_pKeybindManager;

@@ -1,4 +1,5 @@
 #include "HyprlandSocket.hpp"
+#include <cerrno>
 #include <pwd.h>
 #include <sys/socket.h>
 #include "../helpers/StringUtils.hpp"
@@ -10,6 +11,24 @@
 
 using namespace Hyprutils::Memory;
 
+static bool writeAll(const int fd, std::string_view data) {
+    size_t totalWritten = 0;
+    while (totalWritten < data.size()) {
+        const auto written = write(fd, data.data() + totalWritten, data.size() - totalWritten);
+        if (written > 0) {
+            totalWritten += sc<size_t>(written);
+            continue;
+        }
+
+        if (written < 0 && errno == EINTR)
+            continue;
+
+        return false;
+    }
+
+    return true;
+}
+
 static int getUID() {
     const auto UID   = getuid();
     const auto PWUID = getpwuid(UID);
@@ -19,12 +38,10 @@ static int getUID() {
 static std::string getRuntimeDir() {
     const auto XDG = getenv("XDG_RUNTIME_DIR");
 
-    if (!XDG) {
-        const std::string USERID = std::to_string(getUID());
-        return "/run/user/" + USERID + "/hypr";
-    }
+    if (!XDG)
+        return std::format("/run/user/{}/hypr", getUID());
 
-    return std::string{XDG} + "/hypr";
+    return std::format("{}/hypr", XDG);
 }
 
 std::string NHyprlandSocket::send(const std::string& cmd) {
@@ -45,18 +62,16 @@ std::string NHyprlandSocket::send(const std::string& cmd) {
     sockaddr_un serverAddress = {0};
     serverAddress.sun_family  = AF_UNIX;
 
-    std::string socketPath = getRuntimeDir() + "/" + HIS + "/.socket.sock";
+    std::string socketPath = std::format("{}/{}/.socket.sock", getRuntimeDir(), HIS);
 
     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
 
     if (connect(SERVERSOCKET, rc<sockaddr*>(&serverAddress), SUN_LEN(&serverAddress)) < 0) {
-        std::println("{}", failureString("Couldn't connect to " + socketPath + ". (4)"));
+        std::println("{}", failureString("Couldn't connect to {}. (4)", socketPath));
         return "";
     }
 
-    auto sizeWritten = write(SERVERSOCKET, cmd.c_str(), cmd.length());
-
-    if (sizeWritten < 0) {
+    if (!writeAll(SERVERSOCKET, cmd)) {
         std::println("{}", failureString("Couldn't write (5)"));
         return "";
     }
@@ -65,22 +80,20 @@ std::string NHyprlandSocket::send(const std::string& cmd) {
     constexpr size_t BUFFER_SIZE         = 8192;
     char             buffer[BUFFER_SIZE] = {0};
 
-    sizeWritten = read(SERVERSOCKET, buffer, BUFFER_SIZE);
+    while (true) {
+        const auto sizeRead = read(SERVERSOCKET, buffer, BUFFER_SIZE);
+        if (sizeRead < 0) {
+            if (errno == EINTR)
+                continue;
 
-    if (sizeWritten < 0) {
-        std::println("{}", failureString("Couldn't read (6)"));
-        return "";
-    }
-
-    reply += std::string(buffer, sizeWritten);
-
-    while (sizeWritten == BUFFER_SIZE) {
-        sizeWritten = read(SERVERSOCKET, buffer, BUFFER_SIZE);
-        if (sizeWritten < 0) {
-            std::println("{}", failureString("Couldn't read (7)"));
+            std::println("{}", failureString("Couldn't read (6)"));
             return "";
         }
-        reply += std::string(buffer, sizeWritten);
+
+        if (sizeRead == 0)
+            break;
+
+        reply.append(buffer, sc<size_t>(sizeRead));
     }
 
     close(SERVERSOCKET);

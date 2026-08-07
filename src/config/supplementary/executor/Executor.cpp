@@ -7,7 +7,7 @@
 #include "../../../desktop/rule/Engine.hpp"
 #include "../../../desktop/state/FocusState.hpp"
 #include "../../../managers/TokenManager.hpp"
-#include "../../../helpers/Monitor.hpp"
+#include "../../../output/Monitor.hpp"
 
 #include <hyprutils/string/String.hpp>
 #include <chrono>
@@ -25,6 +25,8 @@ CExecutor::CExecutor() {
         if (m_firstExecDispatched)
             return;
 
+        m_isLaunchingExecOnce = true;
+
         // update dbus env
         if (g_pCompositor->m_aqBackend->hasSession())
             spawnRaw(
@@ -36,18 +38,12 @@ CExecutor::CExecutor() {
 
         m_firstExecDispatched = true;
 
-        for (auto const& c : m_execOnce) {
-            auto res = c.withRules ? spawn(c.exec) : spawnRaw(c.exec);
-
-            if (!res || !c.rule)
-                continue;
-
-            const auto TOKEN = g_pTokenManager->registerNewToken(nullptr, std::chrono::seconds(1));
-
-            applyRuleToProc(c.rule, *res, TOKEN);
-        }
+        for (auto const& c : m_execOnce)
+            spawn(c);
 
         m_execOnce.clear(); // free some kb of memory :P
+
+        m_isLaunchingExecOnce = false;
 
         // set input, fixes some certain issues
         g_pInputManager->setKeyboardLayout();
@@ -60,9 +56,8 @@ CExecutor::CExecutor() {
         g_pCompositor->performUserChecks();
 
         m_listeners.shutdown = Event::bus()->m_events.exit.listen([this] {
-            for (auto const& c : m_execShutdown) {
-                c.withRules ? spawn(c.exec) : spawnRaw(c.exec);
-            }
+            for (auto const& c : m_execShutdown)
+                spawn(c);
             m_execShutdown.clear();
         });
     });
@@ -89,16 +84,10 @@ std::optional<uint64_t> CExecutor::spawn(const std::string& args) {
 }
 
 std::optional<uint64_t> CExecutor::spawn(const SExecRequest& args) {
-    auto res = spawn(args.exec);
+    if (args.rule)
+        return spawnWithRules(args.exec, nullptr, args.rule);
 
-    if (!args.rule)
-        return res;
-
-    const auto TOKEN = g_pTokenManager->registerNewToken(nullptr, std::chrono::seconds(1));
-
-    applyRuleToProc(args.rule, *res, TOKEN);
-
-    return res;
+    return args.withRules ? spawn(args.exec) : spawnRaw(args.exec);
 }
 
 std::optional<uint64_t> CExecutor::spawnRaw(const std::string& args) {
@@ -106,6 +95,10 @@ std::optional<uint64_t> CExecutor::spawnRaw(const std::string& args) {
 }
 
 std::optional<uint64_t> CExecutor::spawnWithRules(std::string args, PHLWORKSPACE pInitialWorkspace) {
+    return spawnWithRules(std::move(args), pInitialWorkspace, nullptr);
+}
+
+std::optional<uint64_t> CExecutor::spawnWithRules(std::string args, PHLWORKSPACE pInitialWorkspace, SP<Desktop::Rule::CWindowRule> rule) {
     args = trim(args);
 
     std::string RULES = "";
@@ -120,34 +113,40 @@ std::optional<uint64_t> CExecutor::spawnWithRules(std::string args, PHLWORKSPACE
         args  = args.substr(end + 1);
     }
 
-    std::string execToken = "";
+    SP<Desktop::Rule::CWindowRule> legacyRule;
 
     if (!RULES.empty()) {
-        auto rule = Desktop::Rule::CWindowRule::buildFromExecString(std::move(RULES));
-        if (!rule) {
-            Log::logger->log(Log::ERR, "Failed to parse exec rule: {}", rule.error());
+        auto builtRule = Desktop::Rule::CWindowRule::buildFromExecString(std::move(RULES));
+        if (!builtRule) {
+            Log::logger->log(Log::ERR, "Failed to parse exec rule: {}", builtRule.error());
             return std::nullopt;
         }
 
-        const auto TOKEN = g_pTokenManager->registerNewToken(nullptr, std::chrono::seconds(1));
-
-        const auto PROC = spawnRawProc(args, pInitialWorkspace, TOKEN);
-
-        if (!PROC)
-            return std::nullopt;
-
-        applyRuleToProc(*rule, *PROC, TOKEN);
-
-        return PROC;
+        legacyRule = std::move(*builtRule);
     }
 
-    return spawnRawProc(args, pInitialWorkspace, execToken);
+    if (!legacyRule && !rule)
+        return spawnRawProc(args, pInitialWorkspace);
+
+    const auto TOKEN = g_pTokenManager->registerNewToken(nullptr, std::chrono::seconds(1));
+    const auto PROC  = spawnRawProc(args, pInitialWorkspace, TOKEN);
+
+    if (!PROC || !*PROC)
+        return std::nullopt;
+
+    if (legacyRule)
+        applyRuleToProc(std::move(legacyRule), *PROC, TOKEN);
+    if (rule)
+        applyRuleToProc(std::move(rule), *PROC, TOKEN);
+
+    return PROC;
 }
 
-static std::vector<std::pair<std::string, std::string>> getHyprlandLaunchEnv(PHLWORKSPACE pInitialWorkspace) {
-    static auto PINITIALWSTRACKING = CConfigValue<Config::INTEGER>("misc:initial_workspace_tracking");
+std::vector<std::pair<std::string, std::string>> CExecutor::getHyprlandLaunchEnv(PHLWORKSPACE pInitialWorkspace) {
+    static auto PINITIALWSTRACKING        = CConfigValue<Config::INTEGER>("misc:initial_workspace_tracking");
+    static auto PINITIALWSTRACKINGTIMEOUT = CConfigValue<Config::INTEGER>("misc:initial_workspace_token_timeout");
 
-    if (!*PINITIALWSTRACKING)
+    if (!*PINITIALWSTRACKING || m_isLaunchingExecOnce)
         return {};
 
     const auto PMONITOR = Desktop::focusState()->monitor();
@@ -163,8 +162,8 @@ static std::vector<std::pair<std::string, std::string>> getHyprlandLaunchEnv(PHL
             pInitialWorkspace = PMONITOR->m_activeWorkspace;
     }
 
-    result.push_back(std::make_pair<>("HL_INITIAL_WORKSPACE_TOKEN",
-                                      g_pTokenManager->registerNewToken(Desktop::View::SInitialWorkspaceToken{{}, pInitialWorkspace->getConfigName()}, std::chrono::months(1337))));
+    const auto TIMEOUT = (*PINITIALWSTRACKING == 2) ? std::chrono::seconds(std::chrono::months(1337)) : std::chrono::seconds(*PINITIALWSTRACKINGTIMEOUT);
+    result.emplace_back("HL_INITIAL_WORKSPACE_TOKEN", g_pTokenManager->registerNewToken(Desktop::View::SInitialWorkspaceToken{{}, pInitialWorkspace->getConfigName()}, TIMEOUT));
 
     return result;
 }
@@ -177,7 +176,7 @@ std::optional<uint64_t> CExecutor::spawnRawProc(const std::string& args, PHLWORK
     pid_t      child = fork();
     if (child < 0) {
         Log::logger->log(Log::DEBUG, "Fail to fork");
-        return 0;
+        return std::nullopt;
     }
     if (child == 0) {
         // run in child

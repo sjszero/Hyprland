@@ -14,28 +14,31 @@
 // - kitty
 // - xeyes
 
+#define INCLUDED_FROM_MAIN 1 // Prevent macro redefinition warnings from includes of "tests/*/tests.hpp"
+
 #include "shared.hpp"
 #include "hyprctlCompat.hpp"
 #include "tests/main/tests.hpp"
-#undef TEST_CASES_STORAGE // Prevent redefinition warning
 #include "tests/clients/tests.hpp"
-#undef TEST_CASES_STORAGE // Prevent redefinition warning
-#include "tests/plugin/plugin.hpp"
+#include "tests/misc/tests.hpp"
 #include "tests/shared.hpp"
 
-#include <algorithm>
-#include <filesystem>
 #include <hyprutils/os/Process.hpp>
 #include <hyprutils/memory/WeakPtr.hpp>
 #include <hyprutils/memory/Casts.hpp>
 
-#include <csignal>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
-#include <thread>
+#include <csignal>
+#include <filesystem>
+#include <memory>
 #include <print>
+#include <string>
 #include <string_view>
 #include <span>
+#include <thread>
+#include <vector>
 
 #include "Log.hpp"
 
@@ -45,30 +48,46 @@ using Path = std::filesystem::path;
 
 #define SP CSharedPointer
 
+namespace {
+    struct SSettings {
+        Path                     configPath;
+        Path                     binaryPath;
+        Path                     pluginPath;
+        std::vector<std::string> requestedTests;
+    };
+
+    struct STestsRunResult {
+        unsigned long long       total;
+        std::vector<std::string> failedNames;
+    };
+}
+
 static SP<CProcess> hyprlandProc;
 
 static bool         launchHyprland(Path configPath, Path binaryPath) {
-    NLog::log("{}Launching Hyprland", Colors::YELLOW);
+    NLog::yellow("Launching Hyprland");
     hyprlandProc = makeShared<CProcess>(binaryPath, std::vector<std::string>{"--config", configPath});
     hyprlandProc->addEnv("HYPRLAND_HEADLESS_ONLY", "1");
 
-    NLog::log("{}Launched async process", Colors::YELLOW);
+    NLog::yellow("Launched async process");
 
     return hyprlandProc->runAsync();
 }
 
 static bool hyprlandAlive() {
-    NLog::log("{}hyprlandAlive", Colors::YELLOW);
+    NLog::yellow("hyprlandAlive");
     return kill(hyprlandProc->pid(), 0) == 0 || errno != ESRCH;
 }
 
 [[noreturn]] static void helpAndDie(int exit_code) {
-    NLog::log("usage: hyprtester [arg [...]].\n");
+    NLog::log("usage: hyprtester [--OPTION [VALUE]]... [TEST_NAMES].\n");
     NLog::log(R"(Arguments:
-    --help              -h       - Show this message again
-    --config FILE       -c FILE  - Specify config file to use (default: './test.lua')
-    --binary FILE       -b FILE  - Specify Hyprland binary to use (default: '../build/Hyprland')
-    --plugin FILE       -p FILE  - Specify the location of the test plugin (default: './'))");
+    --help              -h         - Show this message again
+    --config FILE       -c FILE    - Specify config file to use (default: './test.lua')
+    --binary FILE       -b FILE    - Specify Hyprland binary to use (default: '../build/Hyprland')
+    --plugin FILE       -p FILE    - Specify the location of the test plugin (default: './')
+    [TEST_NAMES]                   - Specify list of tests to run (separated by spaces).
+                                     If omitted, all tests will run.)");
 
     std::exit(exit_code);
 }
@@ -85,21 +104,12 @@ static Path validatePathOrDie(Path path) {
     return path;
 }
 
-namespace {
-    struct SSettings {
-        Path configPath;
-        Path binaryPath;
-        Path pluginPath;
-    };
-}
-
 static SSettings parseSettings(const std::span<const char*> args) {
     static const auto cwd = std::filesystem::current_path();
     SSettings         settings{};
 
     for (auto it = args.begin(); it < args.end(); it++) {
         std::string_view value = *it;
-
         if (value == "--config" || value == "-c") {
             if (std::next(it) == args.end()) {
                 helpAndDie(EXIT_FAILURE);
@@ -123,9 +133,11 @@ static SSettings parseSettings(const std::span<const char*> args) {
             it++;
         } else if (value == "--help" || value == "-h") {
             helpAndDie(EXIT_SUCCESS);
+        } else if (!value.starts_with("-")) {
+            settings.requestedTests.emplace_back(value);
         } else {
             std::println(stderr, "[ ERROR ] Unknown option '{}' !", *it);
-            helpAndDie(EXIT_SUCCESS);
+            helpAndDie(EXIT_FAILURE);
         }
     }
 
@@ -144,141 +156,138 @@ static bool preTestCleanup() {
     bool failed = false;
 
     if (!Tests::killAllWindows()) {
-        NLog::log("{}Internal failure: failed to kill all windows", Colors::RED);
+        NLog::red("Internal failure: failed to kill all windows");
         failed = true;
     }
     if (!Tests::killAllLayers()) {
-        NLog::log("{}Internal failure: failed to kill all layers", Colors::RED);
+        NLog::red("Internal failure: failed to kill all layers");
         failed = true;
     }
     if (getFromSocket("/reload") != "ok") {
-        NLog::log("{}Internal failure: failed to reload", Colors::RED);
+        NLog::red("Internal failure: failed to reload");
         failed = true;
     }
     if (!getFromSocket("/activeworkspace").contains("workspace ID 1 (1)")) {
         if (getFromSocket("/dispatch hl.dsp.focus({ workspace = '1' })") != "ok") {
-            NLog::log("{}Internal failure: failed to switch to workspace 1", Colors::RED);
+            NLog::red("Internal failure: failed to switch to workspace 1");
             failed = true;
         }
     }
     if (getFromSocket("/dispatch hl.dsp.cursor.move({ x = 960, y = 540 })") != "ok") {
-        NLog::log("{}Internal failure: failed to reset cursor position", Colors::RED);
+        NLog::red("Internal failure: failed to reset cursor position");
         failed = true;
     }
 
     return !failed;
 }
 
-static void runTests(std::map<const char*, CTestCase&>& testCases) {
-    for (auto& [name, tc] : testCases) {
-        // Clean up before every test
-        NLog::log("{}Cleaning up", Colors::YELLOW);
-        (void)preTestCleanup();
+static STestsRunResult runTests(std::vector<std::shared_ptr<CTestCase>>& testCases) {
+    struct STestsRunResult res{.total = testCases.size(), .failedNames = {}};
 
-        NLog::log("{}Running test {}", Colors::BLUE, name);
-        tc.test();
-        if (tc.failed)
-            NLog::log("{}Test failed: {}", Colors::RED, name);
-        else
-            NLog::log("{}Test passed: {}", Colors::GREEN, name);
+    for (auto& tc : testCases) {
+        // Clean up before every test
+        NLog::yellow("Cleaning up");
+
+        if (!preTestCleanup()) // damn it, something really went wrong
+            std::exit(1);
+
+        NLog::log("{}Running test {}", Colors::BLUE, tc->name());
+        tc->test();
+
+        if (tc->failed) {
+            NLog::red("Test failed!: {}", tc->name());
+            res.failedNames.emplace_back(std::format("{}:{}", tc->groupName(), tc->name()));
+        } else
+            NLog::green("Test passed: {}", tc->name());
     }
+
+    return res;
 }
 
-static long long countFailed(const std::map<const char*, CTestCase&>& testCases) {
-    long long ans = 0;
-    for (const auto& [_, tc] : testCases) {
-        if (tc.failed)
-            ans++;
+static void cleanupAndReport(const STestsRunResult& tInfo) {
+    NLog::green("dispatching exit");
+    getFromSocket("/dispatch hl.dsp.exit()");
+
+    NLog::log("\nSummary:\n\tPASSED: {}{}{}/{}", Colors::GREEN, tInfo.total - tInfo.failedNames.size(), Colors::RESET, tInfo.total);
+    NLog::log("\tFAILED: {}{}{}/{}", Colors::RED, tInfo.failedNames.size(), Colors::RESET, tInfo.total);
+    if (!tInfo.failedNames.empty()) {
+        NLog::red("Failed tests:");
+        for (const auto& name : tInfo.failedNames) {
+            NLog::red("\t- {}", name);
+        }
     }
-    return ans;
+
+    kill(hyprlandProc->pid(), SIGKILL);
+    hyprlandProc.reset();
 }
 
 int main(int argc, char** argv, char** envp) {
 
-    std::span<const char*> args{const_cast<const char**>(argv + 1), sc<std::size_t>(argc - 1)};
-    const SSettings        settings = parseSettings(args);
+    std::span<const char*>                  args{const_cast<const char**>(argv + 1), sc<std::size_t>(argc - 1)};
+    const SSettings                         settings = parseSettings(args);
 
-    NLog::log("{}launching hl", Colors::YELLOW);
+    std::vector<std::shared_ptr<CTestCase>> requestedTestCases;
+    for (auto& test : settings.requestedTests) {
+        if (testCases.contains(test)) {
+            requestedTestCases.push_back(testCases.at(test));
+        } else {
+            NLog::red("ERROR: Unknown test name '{}'", Colors::RED, test);
+            return EXIT_FAILURE;
+        }
+    }
+    if (requestedTestCases.empty()) {
+        // When no tests are explicitly requested, run all tests.
+        // For convenience of log inspection, run tests group by group.
+        requestedTestCases = miscTestCases;
+        std::ranges::copy(clientTestCases, std::back_inserter(requestedTestCases));
+        std::ranges::copy(mainTestCases, std::back_inserter(requestedTestCases));
+    }
+
+    NLog::yellow("launching hl");
     if (!launchHyprland(settings.configPath, settings.binaryPath)) {
-        NLog::log("{}well it failed", Colors::RED);
+        NLog::red("well it failed");
         return 1;
     }
 
     // hyprland has launched, let's check if it's alive after 10s
     std::this_thread::sleep_for(std::chrono::milliseconds(10000));
-    NLog::log("{}slept for 10s", Colors::YELLOW);
+    NLog::yellow("slept for 10s");
     if (!hyprlandAlive()) {
-        NLog::log("{}Hyprland failed to launch", Colors::RED);
+        NLog::red("Hyprland failed to launch!");
         return 1;
     }
 
     // wonderful, we are in. Let's get the instance signature.
-    NLog::log("{}trying to get INSTANCES", Colors::YELLOW);
+    NLog::yellow("trying to get INSTANCES");
     const auto INSTANCES = instances();
     if (INSTANCES.empty()) {
-        NLog::log("{}Hyprland failed to launch (2)", Colors::RED);
+        NLog::red("Hyprland failed to launch (2)");
         return 1;
     }
 
     HIS       = INSTANCES.back().id;
     WLDISPLAY = INSTANCES.back().wlSocket;
 
-    NLog::log("{}trying to get create headless output", Colors::YELLOW);
-    getFromSocket("/output create headless");
-
-    NLog::log("{}trying to load plugin", Colors::YELLOW);
-    if (const auto R = getFromSocket(std::format("/plugin load {}", settings.pluginPath.string())); R != "ok") {
-        NLog::log("{}Failed to load the test plugin: {}", Colors::RED, R);
+    NLog::yellow("trying to get create headless output");
+    const auto CREATE_HEADLESS_2 = getFromSocket("/output create headless HEADLESS-2");
+    if (CREATE_HEADLESS_2 != "ok" && CREATE_HEADLESS_2 != "Name already taken") {
+        NLog::red("Failed to create HEADLESS-2: {}", CREATE_HEADLESS_2);
         getFromSocket("/dispatch hl.dsp.exit()");
         return 1;
     }
 
-    NLog::log("{}Loaded plugin", Colors::YELLOW);
-
-    long long failedTests = 0, totalTests = 0;
-
-    NLog::log("{}Running main tests", Colors::YELLOW);
-    runTests(mainTestCases);
-    failedTests += countFailed(mainTestCases);
-    totalTests += mainTestCases.size();
-
-    NLog::log("{}Running protocol client tests", Colors::YELLOW);
-    runTests(clientTestCases);
-    failedTests += countFailed(clientTestCases);
-    totalTests += clientTestCases.size();
-
-    // TODO: the two tests below should not be hardcoded, include them somewhere
-
-    NLog::log("{}running plugin test", Colors::YELLOW);
-    if (!testPlugin()) {
-        NLog::log("{}Test failed: plugin test", Colors::RED);
-        failedTests++;
-    } else {
-        NLog::log("{}Test passed: plugin test", Colors::GREEN);
+    NLog::yellow("trying to load plugin");
+    if (const auto R = getFromSocket(std::format("/plugin load {}", settings.pluginPath.string())); R != "ok") {
+        NLog::red("Failed to load the test plugin: {}", R);
+        getFromSocket("/dispatch hl.dsp.exit()");
+        return 1;
     }
-    totalTests++;
 
-    NLog::log("{}running vkb test from plugin", Colors::YELLOW);
-    if (!testVkb()) {
-        NLog::log("{}Test failed: vkb test from plugin", Colors::RED);
-        failedTests++;
-    } else {
-        NLog::log("{}Test passed: vkb test from plugin", Colors::GREEN);
-    }
-    totalTests++;
+    NLog::yellow("Loaded plugin");
 
-    // kill hyprland
-    NLog::log("{}dispatching exit", Colors::YELLOW);
-    getFromSocket("/dispatch hl.dsp.exit()");
+    STestsRunResult result = runTests(requestedTestCases);
 
-    NLog::log("\nSummary:\n\tPASSED: {}{}{}/{}", Colors::GREEN, totalTests - failedTests, Colors::RESET, totalTests);
-    NLog::log("\tFAILED: {}{}{}/{}", Colors::RED, failedTests, Colors::RESET, totalTests);
-    if (failedTests > 0)
-        NLog::log("{}Some tests failed.", Colors::RED);
+    cleanupAndReport(result);
 
-    kill(hyprlandProc->pid(), SIGKILL);
-
-    hyprlandProc.reset();
-
-    return failedTests > 0;
+    return result.failedNames.size() > 0;
 }

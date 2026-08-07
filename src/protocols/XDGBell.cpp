@@ -1,7 +1,7 @@
 #include "XDGBell.hpp"
 #include "core/Compositor.hpp"
 #include "../desktop/view/Window.hpp"
-#include "../managers/EventManager.hpp"
+#include "../ipc/s2/S2.hpp"
 #include "../Compositor.hpp"
 
 CXDGSystemBellManagerResource::CXDGSystemBellManagerResource(UP<CXdgSystemBellV1>&& resource) : m_resource(std::move(resource)) {
@@ -13,7 +13,7 @@ CXDGSystemBellManagerResource::CXDGSystemBellManagerResource(UP<CXdgSystemBellV1
 
     m_resource->setRing([](CXdgSystemBellV1* r, wl_resource* surface) {
         if (!surface) {
-            g_pEventManager->postEvent(SHyprIPCEvent{
+            IPC::Socket2::sock()->postEvent({
                 .event = "bell",
                 .data  = "",
             });
@@ -23,19 +23,19 @@ CXDGSystemBellManagerResource::CXDGSystemBellManagerResource(UP<CXdgSystemBellV1
         const auto SURFACE = CWLSurfaceResource::fromResource(surface);
 
         if (!SURFACE) {
-            g_pEventManager->postEvent(SHyprIPCEvent{
+            IPC::Socket2::sock()->postEvent({
                 .event = "bell",
                 .data  = "",
             });
             return;
         }
 
-        for (const auto& w : g_pCompositor->m_windows) {
+        for (const auto& w : Desktop::windowState()->windows()) {
             if (!w->m_isMapped || w->m_isX11 || !w->m_xdgSurface || !w->wlSurface())
                 continue;
 
             if (w->wlSurface()->resource() == SURFACE) {
-                g_pEventManager->postEvent(SHyprIPCEvent{
+                IPC::Socket2::sock()->postEvent({
                     .event = "bell",
                     .data  = std::format("{:x}", rc<uintptr_t>(w.get())),
                 });
@@ -43,7 +43,7 @@ CXDGSystemBellManagerResource::CXDGSystemBellManagerResource(UP<CXdgSystemBellV1
             }
         }
 
-        g_pEventManager->postEvent(SHyprIPCEvent{
+        IPC::Socket2::sock()->postEvent({
             .event = "bell",
             .data  = "",
         });

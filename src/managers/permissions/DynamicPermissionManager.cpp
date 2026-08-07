@@ -54,6 +54,7 @@ static const char* permissionToString(eDynamicPermissionType type) {
         case PERMISSION_TYPE_PLUGIN: return "PERMISSION_TYPE_PLUGIN";
         case PERMISSION_TYPE_KEYBOARD: return "PERMISSION_TYPE_KEYBOARD";
         case PERMISSION_TYPE_CURSOR_POS: return "PERMISSION_TYPE_CURSOR_POS";
+        case PERMISSION_TYPE_INPUT_CAPTURE: return "PERMISSION_TYPE_INPUT_CAPTURE";
     }
 
     return "error";
@@ -84,7 +85,7 @@ eDynamicPermissionAllowMode CDynamicPermissionManager::clientPermissionMode(wl_c
     const auto LOOKUP = binaryNameForWlClient(client);
 
     Log::logger->log(Log::TRACE, "CDynamicPermissionManager::clientHasPermission: checking permission {} for client {:x} (binary {})", permissionToString(permission),
-                     rc<uintptr_t>(client), LOOKUP.has_value() ? LOOKUP.value() : "lookup failed: " + LOOKUP.error());
+                     rc<uintptr_t>(client), LOOKUP.has_value() ? LOOKUP.value() : std::format("lookup failed: {}", LOOKUP.error()));
 
     // first, check if we have the client + perm combo in our cache.
     auto it = std::ranges::find_if(m_rules, [client, permission](const auto& e) { return e->m_client == client && e->m_type == permission; });
@@ -160,7 +161,7 @@ eDynamicPermissionAllowMode CDynamicPermissionManager::clientPermissionModeWithS
         lookup = binaryNameForPid(pid);
 
         Log::logger->log(Log::TRACE, "CDynamicPermissionManager::clientHasPermission: checking permission {} for key {} (binary {})", permissionToString(permission), str,
-                         lookup.has_value() ? lookup.value() : "lookup failed: " + lookup.error());
+                         lookup.has_value() ? lookup.value() : std::format("lookup failed: {}", lookup.error()));
 
         if (lookup.has_value())
             binaryName = *lookup;
@@ -256,6 +257,7 @@ void CDynamicPermissionManager::askForPermission(wl_client* client, const std::s
         case PERMISSION_TYPE_PLUGIN: description = I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_REQUEST_PLUGIN, {{"app", appName}, {"plugin", binaryPath}}); break;
         case PERMISSION_TYPE_KEYBOARD: description = I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_REQUEST_KEYBOARD, {{"keyboard", binaryPath}}); break;
         case PERMISSION_TYPE_UNKNOWN: description = I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_REQUEST_UNKNOWN, {{"app", appName}}); break;
+        case PERMISSION_TYPE_INPUT_CAPTURE: description = I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_REQUEST_INPUT_CAPTURE, {{"app", appName}}); break;
     }
 
     std::vector<std::string> options;

@@ -1,9 +1,9 @@
 #include "defines.hpp"
 #include "debug/log/Logger.hpp"
 #include "Compositor.hpp"
-#include "config/legacy/ConfigManager.hpp"
+#include "config/ConfigManager.hpp"
 #include "init/initHelpers.hpp"
-#include "debug/HyprCtl.hpp"
+#include "ipc/s1/S1.hpp"
 #include "helpers/env/Env.hpp"
 
 #include <csignal>
@@ -37,7 +37,8 @@ static void help() {
     --i-am-really-stupid         - Omits root user privileges check (why would you do that?)
     --verify-config              - Do not run Hyprland, only print if the config has any errors
     --version           -v       - Print this binary's version
-    --version-json               - Print this binary's version as json)#");
+    --version-json               - Print this binary's version as json
+    --locked-cmd [COMMAND]       - Launches locker on startup via the provided command)#");
 }
 
 static void reapZombieChildrenAutomatically() {
@@ -70,8 +71,9 @@ int main(int argc, char** argv) {
     // parse some args
     std::string configPath;
     std::string socketName;
+    std::string startLockedCommand;
     int         socketFd   = -1;
-    bool        ignoreSudo = false, verifyConfig = false, safeMode = false;
+    bool        ignoreSudo = false, verifyConfig = false, safeMode = false, startLocked = false;
     int         watchdogFd = -1;
 
     if (argc > 1) {
@@ -147,13 +149,13 @@ int main(int argc, char** argv) {
 
                 return 0;
             } else if (value == "-v" || value == "--version") {
-                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                std::println("{}", IPC::Socket1::version(IPC::Socket1::eOutputFormat::FORMAT_NORMAL));
                 return 0;
             } else if (value == "--version-json") {
-                std::println("{}", versionRequest(eHyprCtlOutputFormat::FORMAT_JSON, ""));
+                std::println("{}", IPC::Socket1::version(IPC::Socket1::eOutputFormat::FORMAT_JSON));
                 return 0;
             } else if (value == "--systeminfo") {
-                std::println("{}", systemInfoRequest(eHyprCtlOutputFormat::FORMAT_NORMAL, ""));
+                std::println("{}", IPC::Socket1::systemInfo(IPC::Socket1::eOutputFormat::FORMAT_NORMAL));
                 return 0;
             } else if (value == "--verify-config") {
                 verifyConfig = true;
@@ -176,6 +178,20 @@ int main(int argc, char** argv) {
                     help();
                     return 1;
                 }
+            } else if (value == "--locked-cmd") {
+                if (std::next(it) == args.end()) {
+                    help();
+                    return 1;
+                }
+
+                startLocked        = true;
+                startLockedCommand = *std::next(it);
+                it++;
+
+                continue;
+            } else if (value == "--locked") {
+                startLocked = true;
+                continue;
             } else {
                 std::println(stderr, "[ ERROR ] Unknown option '{}' !", value);
                 help();
@@ -236,10 +252,9 @@ int main(int argc, char** argv) {
 
 
 )#");
-
-        if (!Env::envEnabled("HYPRLAND_NO_RT"))
-            NInit::gainRealTime();
     }
+
+    NInit::lowerAmbientCaps();
 
     // let's init the compositor.
     // it initializes basic Wayland stuff in the constructor.
@@ -260,13 +275,21 @@ int main(int argc, char** argv) {
     if (safeMode)
         g_pCompositor->m_safeMode = true;
 
+    if (startLocked) {
+        g_pCompositor->m_startLocked        = true;
+        g_pCompositor->m_startLockedCommand = startLockedCommand;
+    }
+
     if (!watchdogOk && !verifyConfig)
         Log::logger->log(Log::WARN, "WARNING: Hyprland is being launched without start-hyprland. This is highly advised against.");
 
     g_pCompositor->initServer(socketName, socketFd);
 
-    if (verifyConfig)
-        return !Config::mgr()->configVerifPassed();
+    if (verifyConfig) {
+        const auto verify = Config::mgr()->configVerifPassed();
+        Config::mgr().reset();
+        return !verify;
+    }
 
     Log::logger->log(Log::DEBUG, "Hyprland init finished.");
 

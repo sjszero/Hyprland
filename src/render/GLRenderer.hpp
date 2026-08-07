@@ -20,18 +20,25 @@ namespace Render::GL {
         SP<ITexture>            createTexture(cairo_surface_t* cairo) override;
         SP<ITexture>            createTexture(std::span<const float> lut3D, size_t N) override;
         bool                    explicitSyncSupported() override;
+        bool                    fp16Supported() override;
         std::vector<SDRMFormat> getDRMFormats() override;
         std::vector<uint64_t>   getDRMFormatModifiers(DRMFormat format) override;
         SP<IFramebuffer>        createFB(const std::string& name = "") override;
         void                    disableScissor() override;
         void                    blend(bool enabled) override;
-        void                    drawShadow(const CBox& box, int round, float roundingPower, int range, CHyprColor color, float a) override;
-        SP<ITexture>            blurFramebuffer(SP<IFramebuffer> source, float a, CRegion* originalDamage) override;
-        void                    setViewport(int x, int y, int width, int height) override;
-        bool                    reloadShaders(const std::string& path = "") override;
+        void                    drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) override;
+        void drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
+                        float a) override;
 
-        void                    unsetEGL();
-        WP<IElementRenderer>    elementRenderer() override;
+        void drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) override;
+        void drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
+                      float a) override;
+        SP<ITexture>         blurFramebuffer(SP<IFramebuffer> source, float a, CRegion* originalDamage) override;
+        void                 setViewport(int x, int y, int width, int height) override;
+        bool                 reloadShaders(const std::string& path = "") override;
+
+        void                 unsetEGL();
+        WP<IElementRenderer> elementRenderer() override;
 
       private:
         void                 renderOffToMain(SP<IFramebuffer> off) override;

@@ -1,7 +1,5 @@
 #include "Subcompositor.hpp"
 #include "Compositor.hpp"
-#include "protocols/FractionalScale.hpp"
-#include "../../Compositor.hpp"
 #include <algorithm>
 
 CWLSubsurfaceResource::CWLSubsurfaceResource(SP<CWlSubsurface> resource_, SP<CWLSurfaceResource> surface_, SP<CWLSurfaceResource> parent_) :
@@ -31,7 +29,7 @@ CWLSubsurfaceResource::CWLSubsurfaceResource(SP<CWlSubsurface> resource_, SP<CWL
 
         if ((it == m_parent->m_subsurfaces.end() && m_parent != SURF) || SURF == m_surface) {
             // protocol error, this is not a valid surface
-            r->error(-1, "Invalid surface in placeAbove");
+            r->error(WL_SUBSURFACE_ERROR_BAD_SURFACE, "Invalid surface in placeAbove");
             return;
         }
 
@@ -61,7 +59,7 @@ CWLSubsurfaceResource::CWLSubsurfaceResource(SP<CWlSubsurface> resource_, SP<CWL
 
         if ((it == m_parent->m_subsurfaces.end() && m_parent != SURF) || SURF == m_surface) {
             // protocol error, this is not a valid surface
-            r->error(-1, "Invalid surface in placeBelow");
+            r->error(WL_SUBSURFACE_ERROR_BAD_SURFACE, "Invalid surface in placeBelow");
             return;
         }
 
@@ -163,13 +161,19 @@ CWLSubcompositorResource::CWLSubcompositorResource(SP<CWlSubcompositor> resource
         auto SURF   = CWLSurfaceResource::fromResource(surface);
         auto PARENT = CWLSurfaceResource::fromResource(parent);
 
-        if UNLIKELY (!SURF || !PARENT || SURF == PARENT) {
+        if UNLIKELY (!SURF || !PARENT) {
             r->error(WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE, "Invalid surface/parent");
             return;
         }
 
+        // the parent must be different from the child surface, otherwise bad_parent is raised (wl_subcompositor spec)
+        if UNLIKELY (SURF == PARENT) {
+            r->error(WL_SUBCOMPOSITOR_ERROR_BAD_PARENT, "Parent surface must be different from the child surface");
+            return;
+        }
+
         if UNLIKELY (SURF->m_role->role() != SURFACE_ROLE_UNASSIGNED) {
-            r->error(-1, "Surface already has a different role");
+            r->error(WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE, "Surface already has a different role");
             return;
         }
 
@@ -198,15 +202,6 @@ CWLSubcompositorResource::CWLSubcompositorResource(SP<CWlSubcompositor> resource
         RESOURCE->m_self = RESOURCE;
         SURF->m_role     = makeShared<CSubsurfaceRole>(RESOURCE);
         PARENT->m_subsurfaces.emplace_back(RESOURCE);
-
-        if (PROTO::fractional->hasKnownScale(PARENT)) {
-            const auto PARENTSURFACE = Desktop::View::CWLSurface::fromResource(PARENT);
-
-            if (PARENTSURFACE) {
-                g_pCompositor->setPreferredScaleForSurface(SURF, PARENTSURFACE->m_lastScaleFloat);
-                g_pCompositor->setPreferredTransformForSurface(SURF, PARENTSURFACE->m_lastTransform);
-            }
-        }
 
         LOGM(Log::DEBUG, "New wl_subsurface with id {} at {:x}", id, (uintptr_t)RESOURCE.get());
 

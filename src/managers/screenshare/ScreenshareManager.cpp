@@ -3,6 +3,7 @@
 #include "../../Compositor.hpp"
 #include "../../desktop/view/Window.hpp"
 #include "../../protocols/core/Seat.hpp"
+#include "../../state/MonitorState.hpp"
 
 using namespace Screenshare;
 
@@ -32,7 +33,7 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
             return;
 
         if (frame->m_session->m_type == SHARE_WINDOW) {
-            CBox geometry = {frame->m_session->m_window->m_realPosition->value(), frame->m_session->m_window->m_realSize->value()};
+            CBox geometry = frame->m_session->m_window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             if (geometry.intersection({monitor->m_position, monitor->m_size}).empty())
                 return;
         }
@@ -40,11 +41,11 @@ void CScreenshareManager::onOutputCommit(PHLMONITOR monitor) {
         frame->copy();
     });
 
-    std::erase_if(m_pendingFrames, [&](const WP<CScreenshareFrame>& frame) { return frame.expired(); });
+    std::erase_if(m_pendingFrames, [&](const WP<CScreenshareFrame>& frame) { return frame.expired() || frame->done(); });
 }
 
 UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMONITOR monitor) {
-    if UNLIKELY (!monitor || !g_pCompositor->monitorExists(monitor)) {
+    if UNLIKELY (!monitor || !State::monitorState()->contains(monitor)) {
         LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
         return nullptr;
     }
@@ -58,7 +59,7 @@ UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMO
 }
 
 UP<CScreenshareSession> CScreenshareManager::newSession(wl_client* client, PHLMONITOR monitor, CBox captureRegion) {
-    if UNLIKELY (!monitor || !g_pCompositor->monitorExists(monitor)) {
+    if UNLIKELY (!monitor || !State::monitorState()->contains(monitor)) {
         LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
         return nullptr;
     }
@@ -147,7 +148,7 @@ WP<CScreenshareSession> CScreenshareManager::getManagedSession(eScreenshareType 
                 return;
 
             const auto& session = managed->m_session;
-            std::erase_if(Screenshare::mgr()->m_managedSessions, [&session](const auto& s) { return s && s->m_session == session; });
+            std::erase_if(Screenshare::mgr()->m_managedSessions, [&session](const auto& s) { return s && s->m_session.get() == session.get(); });
         });
     }
 

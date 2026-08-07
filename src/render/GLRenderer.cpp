@@ -2,15 +2,15 @@
 #include "decorations/CHyprInnerGlowDecoration.hpp"
 #include <aquamarine/output/Output.hpp>
 #include "../config/ConfigValue.hpp"
-#include "../managers/CursorManager.hpp"
-#include "../managers/PointerManager.hpp"
+#include "../pointer/cursor/CursorManager.hpp"
+#include "../pointer/PointerManager.hpp"
 #include "../protocols/SessionLock.hpp"
 #include "../protocols/LayerShell.hpp"
 #include "../protocols/PresentationTime.hpp"
 #include "../protocols/core/DataDevice.hpp"
 #include "../protocols/core/Compositor.hpp"
 #include "../debug/Overlay.hpp"
-#include "../helpers/Monitor.hpp"
+#include "../output/Monitor.hpp"
 #include "pass/TexPassElement.hpp"
 #include "pass/SurfacePassElement.hpp"
 #include "../debug/log/Logger.hpp"
@@ -55,7 +55,7 @@ bool CHyprGLRenderer::initRenderBuffer(SP<Aquamarine::IBuffer> buffer, uint32_t 
         return false;
     }
 
-    return m_currentRenderbuffer;
+    return !!m_currentRenderbuffer;
 }
 
 bool CHyprGLRenderer::beginFullFakeRenderInternal(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple) {
@@ -111,13 +111,13 @@ void CHyprGLRenderer::endRender(const std::function<void()>& renderingDoneCallba
     if (!explicitSyncSupported()) {
         Log::logger->log(Log::TRACE, "renderer: Explicit sync unsupported, falling back to implicit in endRender");
 
-        // nvidia doesn't have implicit sync, so we have to explicitly wait here, llvmpipe and other software renderer seems to bug out aswell.
+        // nvidia doesn't have implicit sync, so we have to explicitly wait here, llvmpipe and other software renderer seems to bug out as well.
         if ((isNvidia() && *PNVIDIAANTIFLICKER) || isSoftware())
             glFinish();
         else
             glFlush(); // mark an implicit sync point
 
-        m_usedAsyncBuffers.clear(); // release all buffer refs and hope implicit sync works
+        PMONITOR->m_usedAsyncBuffers.clear(); // release all buffer refs and hope implicit sync works
         if (renderingDoneCallback)
             renderingDoneCallback();
 
@@ -126,31 +126,42 @@ void CHyprGLRenderer::endRender(const std::function<void()>& renderingDoneCallba
 
     auto eglSync = createSyncFDManager();
     if LIKELY (eglSync && eglSync->isValid()) {
-        for (auto const& buf : m_usedAsyncBuffers) {
-            for (const auto& releaser : buf->m_syncReleasers) {
+        for (auto& buf : PMONITOR->m_usedAsyncBuffers) {
+            if (buf.first.expired()) // surface is gone.
+                continue;
+
+            for (const auto& releaser : buf.second->m_syncReleasers) {
                 releaser->addSyncFileFd(eglSync->fd());
             }
         }
 
         // release buffer refs with release points now, since syncReleaser handles actual buffer release based on EGLSync
-        std::erase_if(m_usedAsyncBuffers, [](const auto& buf) { return !buf->m_syncReleasers.empty(); });
+        std::erase_if(PMONITOR->m_usedAsyncBuffers, [](const auto& buf) { return buf.first.expired() || !buf.second->m_syncReleasers.empty(); });
 
         // release buffer refs without release points when EGLSync sync_file/fence is signalled
-        g_pEventLoopManager->doOnReadable(eglSync->fd().duplicate(), [renderingDoneCallback, prevbfs = std::move(m_usedAsyncBuffers)]() mutable {
+        g_pEventLoopManager->doOnReadable(eglSync->fd().duplicate(), [renderingDoneCallback, prevbfs = std::move(PMONITOR->m_usedAsyncBuffers)]() mutable {
             prevbfs.clear();
             if (renderingDoneCallback)
                 renderingDoneCallback();
         });
-        m_usedAsyncBuffers.clear();
+        PMONITOR->m_usedAsyncBuffers.clear();
 
         if (m_renderMode == RENDER_MODE_NORMAL) {
             PMONITOR->m_inFence = eglSync->takeFd();
             PMONITOR->m_output->state->setExplicitInFence(PMONITOR->m_inFence.get());
         }
     } else {
-        Log::logger->log(Log::ERR, "renderer: Explicit sync failed, releasing resources");
+        Log::logger->log(Log::ERR, "renderer: Explicit sync failed, falling back to implicit sync");
 
-        m_usedAsyncBuffers.clear(); // release all buffer refs and hope implicit sync works
+        // Establish an implicit synchronization point without blocking the render loop.
+        glFlush();
+
+        if (m_renderMode == RENDER_MODE_NORMAL && PMONITOR) {
+            PMONITOR->m_inFence.reset();
+            PMONITOR->m_output->state->resetExplicitFences();
+        }
+
+        PMONITOR->m_usedAsyncBuffers.clear();
         if (renderingDoneCallback)
             renderingDoneCallback();
     }
@@ -254,6 +265,10 @@ bool CHyprGLRenderer::explicitSyncSupported() {
     return g_pHyprOpenGL->explicitSyncSupported();
 }
 
+bool CHyprGLRenderer::fp16Supported() {
+    return g_pHyprOpenGL->fp16Supported();
+}
+
 std::vector<SDRMFormat> CHyprGLRenderer::getDRMFormats() {
     return g_pHyprOpenGL->getDRMFormats();
 }
@@ -275,8 +290,22 @@ void CHyprGLRenderer::blend(bool enabled) {
     g_pHyprOpenGL->blend(enabled);
 }
 
-void CHyprGLRenderer::drawShadow(const CBox& box, int round, float roundingPower, int range, CHyprColor color, float a) {
+void CHyprGLRenderer::drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) {
     g_pHyprOpenGL->renderRoundedShadow(box, round, roundingPower, range, color, a);
+}
+
+void CHyprGLRenderer::drawShadow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
+                                 float lerp, float a) {
+    g_pHyprOpenGL->renderRoundedShadow(box, round, roundingPower, range, grad1, grad2, lerp, a);
+}
+
+void CHyprGLRenderer::drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a) {
+    g_pHyprOpenGL->renderInnerGlow(box, round, roundingPower, range, color, 0, a);
+}
+
+void CHyprGLRenderer::drawGlow(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
+                               float lerp, float a) {
+    g_pHyprOpenGL->renderInnerGlow(box, round, roundingPower, range, grad1, grad2, lerp, 0, a);
 }
 
 SP<ITexture> CHyprGLRenderer::blurFramebuffer(SP<IFramebuffer> source, float a, CRegion* originalDamage) {

@@ -1,5 +1,23 @@
 -- Hyprtester Lua config
 
+local function config_dir()
+    local source = debug.getinfo(1, "S").source
+    local path = source:sub(1, 1) == "@" and source:sub(2) or source
+
+    if path:sub(1, 1) ~= "/" then
+        path = os.getenv("PWD") .. "/" .. path
+    end
+
+    return path:match("^(.*)/[^/]*$") or "."
+end
+
+local requireAbsolute = require(config_dir() .. "/lua-require/absolute.lua")
+local requireRelative = require("./lua-require/relative.lua")
+local requireWildcard = require("./lua-require/wildcard/*")
+
+_G.hyprtester_lua_require_result = table.concat({ requireAbsolute, requireRelative, requireWildcard[1], requireWildcard[2] }, ":")
+assert(_G.hyprtester_lua_require_result == "absolute:relative:a:b")
+
 hl.monitor({ output = "HEADLESS-1", mode = "1920x1080@60", position = "auto-right", scale = "1" })
 hl.monitor({ output = "HEADLESS-2", mode = "1920x1080@60", position = "auto-right", scale = "1" })
 hl.monitor({ output = "HEADLESS-3", mode = "1920x1080@60", position = "auto-right", scale = "1" })
@@ -205,6 +223,8 @@ hl.define_submap("submap1", function()
     hl.bind("i", hl.dsp.submap("submap3"))
     hl.bind("o", hl.dsp.exec_cmd(terminal))
     hl.bind("p", hl.dsp.submap("reset"))
+    hl.bind("mouse_down", hl.dsp.exec_cmd("touch /tmp/hyprtester-keybinds.txt"))
+    hl.bind("mouse:272", hl.dsp.exec_cmd("touch /tmp/hyprtester-keybinds.txt"))
 end)
 
 hl.define_submap("submap2", "submap1", function()
@@ -324,3 +344,5 @@ hl.layout.register("grid", {
     end,
 })
 
+-- this is here to guard a crash, see #15521
+hl.dispatch(hl.dsp.submap("reset"))

@@ -25,6 +25,7 @@
   lcms2,
   libGL,
   libdrm,
+  libei,
   libexecinfo,
   libinput,
   libxcb,
@@ -42,6 +43,7 @@
   pciutils,
   python3,
   re2,
+  sdbus-cpp_2,
   systemd,
   tomlplusplus,
   udis86-hyprland,
@@ -58,6 +60,7 @@
   commit,
   revCount,
   date,
+  readline,
   # deprecated flags
   enableNvidiaPatches ? false,
   nvidiaPatches ? false,
@@ -190,6 +193,7 @@ customStdenv.mkDerivation (finalAttrs: {
       libdrm
       libgbm
       libGL
+      libei
       libinput
       libuuid
       libxcursor
@@ -199,11 +203,13 @@ customStdenv.mkDerivation (finalAttrs: {
       pango
       pciutils
       re2
+      sdbus-cpp_2
       tomlplusplus
       udis86-hyprland
       wayland
       wayland-protocols
       wayland-scanner
+      readline
     ]
     (optionals customStdenv.hostPlatform.isBSD [ epoll-shim ])
     (optionals customStdenv.hostPlatform.isMusl [ libexecinfo ])
@@ -260,6 +266,8 @@ customStdenv.mkDerivation (finalAttrs: {
       install hyprtester/pointer-scroll -t $out/bin
       install hyprtester/shortcut-inhibitor -t $out/bin
       install hyprtester/keyboard-modifiers -t $out/bin
+      install hyprtester/surface-scale-transform -t $out/bin
+      install hyprtester/xdg-interactive -t $out/bin
       install hyprland_gtests -t $out/bin
       install hyprtester/child-window -t $out/bin
     ''}

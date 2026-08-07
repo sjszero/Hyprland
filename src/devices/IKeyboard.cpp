@@ -1,6 +1,6 @@
 #include "IKeyboard.hpp"
 #include "../defines.hpp"
-#include "../config/legacy/ConfigManager.hpp"
+#include "../config/ConfigManager.hpp"
 #include "../managers/input/InputManager.hpp"
 #include "../managers/SeatManager.hpp"
 #include "../helpers/MiscFunctions.hpp"
@@ -99,8 +99,8 @@ void IKeyboard::setKeymap(const SStringRuleNames& rules) {
         m_xkbKeymap = xkb_keymap_new_from_names2(CONTEXT, &XKBRULES, XKB_KEYMAP_FORMAT_TEXT_V2, XKB_KEYMAP_COMPILE_NO_FLAGS);
 
     if (!m_xkbKeymap) {
-        ErrorOverlay::overlay()->queueError("Invalid keyboard layout passed. ( rules: " + rules.rules + ", model: " + rules.model + ", variant: " + rules.variant +
-                                            ", options: " + rules.options + ", layout: " + rules.layout + " )");
+        ErrorOverlay::overlay()->queueError(std::format("Invalid keyboard layout passed. ( rules: {}, model: {}, variant: {}, options: {}, layout: {} )", rules.rules, rules.model,
+                                                        rules.variant, rules.options, rules.layout));
 
         Log::logger->log(Log::ERR, "Keyboard layout {} with variant {} (rules: {}, model: {}, options: {}) couldn't have been loaded.", rules.layout, rules.variant, rules.rules,
                          rules.model, rules.options);
@@ -187,6 +187,9 @@ void IKeyboard::updateKeymapFD() {
             memcpy(keymapV1FDDest, m_xkbKeymapV1String.c_str(), m_xkbKeymapV1String.length());
             munmap(keymapV1FDDest, m_xkbKeymapV1String.length() + 1);
             m_xkbKeymapV1FD = std::move(roV1);
+
+            m_xkbKeymapFD.setFlags(m_xkbKeymapFD.getFlags() | FD_CLOEXEC);
+            m_xkbKeymapV1FD.setFlags(m_xkbKeymapV1FD.getFlags() | FD_CLOEXEC);
         }
     }
 

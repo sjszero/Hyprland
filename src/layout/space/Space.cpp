@@ -8,7 +8,7 @@
 #include "../../config/shared/workspace/WorkspaceRuleManager.hpp"
 #include "../../config/ConfigValue.hpp"
 #include "../../event/EventBus.hpp"
-#include "../../helpers/Monitor.hpp"
+#include "../../output/Monitor.hpp"
 
 using namespace Layout;
 
@@ -92,7 +92,7 @@ void CSpace::recheckWorkArea() {
         PFLOATGAPS = PGAPSOUT;
 
     auto                   gapsOut   = WORKSPACERULE.m_gapsOut.value_or(*PGAPSOUT);
-    auto                   gapsFloat = WORKSPACERULE.m_gapsOut.value_or(*PFLOATGAPS);
+    auto                   gapsFloat = WORKSPACERULE.m_floatGaps.value_or(*PFLOATGAPS);
 
     Desktop::CReservedArea reservedGaps{gapsOut.m_top, gapsOut.m_right, gapsOut.m_bottom, gapsOut.m_left};
     Desktop::CReservedArea reservedFloatGaps{gapsFloat.m_top, gapsFloat.m_right, gapsFloat.m_bottom, gapsFloat.m_left};
@@ -153,31 +153,6 @@ void CSpace::recalculate(eRecalculateReason reason) {
         m_algorithm->recalculate(reason);
 }
 
-eFullscreenRequestResult CSpace::setFullscreen(SP<ITarget> t, eFullscreenMode currentEffectiveMode, eFullscreenMode mode) {
-    if (!t)
-        return FULLSCREEN_REQUEST_DEFAULT;
-
-    const auto REQUEST_RESULT = m_algorithm ? m_algorithm->requestFullscreen(t, currentEffectiveMode, mode) : FULLSCREEN_REQUEST_DEFAULT;
-
-    t->setLayoutManagedFullscreen(REQUEST_RESULT == FULLSCREEN_REQUEST_HANDLED_BY_LAYOUT && mode == FSMODE_FULLSCREEN);
-    if (REQUEST_RESULT != FULLSCREEN_REQUEST_HANDLED_BY_LAYOUT)
-        t->setFullscreenMode(mode);
-
-    if (REQUEST_RESULT == FULLSCREEN_REQUEST_HANDLED_BY_LAYOUT) {
-        if (const auto WORKSPACE = workspace()) {
-            WORKSPACE->m_fullscreenMode      = FSMODE_NONE;
-            WORKSPACE->m_hasFullscreenWindow = false;
-        }
-    }
-
-    if (mode == FSMODE_NONE && m_algorithm && t->floating())
-        m_algorithm->recenter(t);
-
-    recalculate(RECALCULATE_REASON_TOGGLE_FULLSCREEN);
-
-    return REQUEST_RESULT;
-}
-
 Config::ErrorResult CSpace::layoutMsg(const std::string_view& sv) {
     if (m_algorithm)
         return m_algorithm->layoutMsg(sv);
@@ -219,8 +194,9 @@ SP<ITarget> CSpace::getNextCandidate(SP<ITarget> old) {
 }
 
 bool Layout::isHardRecalculateReason(eRecalculateReason reason) {
-    return reason != RECALCULATE_REASON_WORKSPACE_CHANGE && reason != RECALCULATE_REASON_SPECIAL_WORKSPACE_TOGGLE && reason != RECALCULATE_REASON_TOGGLE_FULLSCREEN &&
-        reason != RECALCULATE_REASON_INVALIDATE_MONITOR_GEOMETRIES && reason != RECALCULATE_REASON_RENDER_MOINTOR;
+    return reason != RECALCULATE_REASON_WORKSPACE_CHANGE && reason != RECALCULATE_REASON_SPECIAL_WORKSPACE_TOGGLE &&
+        reason != RECALCULATE_REASON_TOGGLE_LAYOUT_HANDLED_FULLSCREEN && reason != RECALCULATE_REASON_TOGGLE_DEFAULT_HANDLED_FULLSCREEN &&
+        reason != RECALCULATE_REASON_INVALIDATE_MONITOR_GEOMETRIES && reason != RECALCULATE_REASON_RENDER_MONITOR;
 }
 
 const std::vector<WP<ITarget>>& CSpace::targets() const {
@@ -232,7 +208,7 @@ eRecalculateReason Layout::recalcMonitorReasonToRecalcReason(CLayoutManager::eRe
     switch (reason) {
         case CLayoutManager::RECALCULATE_MONITOR_REASON_TOGGLE_SPECIAL_WORKSPACE: return RECALCULATE_REASON_SPECIAL_WORKSPACE_TOGGLE;
         case CLayoutManager::RECALCULATE_MONITOR_REASON_WORKSPACE_CHANGE: return RECALCULATE_REASON_WORKSPACE_CHANGE;
-        case CLayoutManager::RECALCULATE_MONITOR_REASON_TOGGLE_FULLSCREEN: return RECALCULATE_REASON_TOGGLE_FULLSCREEN;
+        case CLayoutManager::RECALCULATE_MONITOR_REASON_TOGGLE_FULLSCREEN: return RECALCULATE_REASON_TOGGLE_DEFAULT_HANDLED_FULLSCREEN;
         default: return RECALCULATE_REASON_UNKNOWN;
     }
 }

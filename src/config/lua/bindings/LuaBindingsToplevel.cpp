@@ -9,6 +9,9 @@
 
 #include "../../../devices/IKeyboard.hpp"
 #include "../../../managers/eventLoop/EventLoopManager.hpp"
+#include "../../../managers/SessionLockManager.hpp"
+#include "../../../plugins/PluginSystem.hpp"
+#include "managers/KeybindManager.hpp"
 
 #include <hyprutils/string/Numeric.hpp>
 #include <hyprutils/string/String.hpp>
@@ -18,6 +21,11 @@ using namespace Config;
 using namespace Config::Lua;
 using namespace Config::Lua::Bindings;
 using namespace Hyprutils::String;
+
+extern "C" {
+#include <lua.h>
+#include <xkbcommon/xkbcommon.h>
+}
 
 static std::optional<eKeyboardModifiers> modFromSv(std::string_view sv) {
     if (sv == "SHIFT")
@@ -238,6 +246,7 @@ static int hlBind(lua_State* L) {
             }
             lua_pop(L, 1);
         }
+        kb.allowInputCapture = getBool("allow_input_capture");
         lua_pop(L, 1);
     }
 
@@ -282,6 +291,33 @@ static int hlVersion(lua_State* L) {
     return 1;
 }
 
+static int hlGetPlugins(lua_State* L) {
+    if (!g_pPluginSystem) {
+        lua_newtable(L);
+        return 1;
+    }
+
+    const auto PLUGINS = g_pPluginSystem->getAllPlugins();
+
+    lua_createtable(L, PLUGINS.size(), 0);
+
+    int i = 1;
+    for (const auto& plugin : PLUGINS) {
+        lua_createtable(L, 0, 4);
+        lua_pushstring(L, plugin->m_name.c_str());
+        lua_setfield(L, -2, "name");
+        lua_pushstring(L, plugin->m_author.c_str());
+        lua_setfield(L, -2, "author");
+        lua_pushstring(L, plugin->m_version.c_str());
+        lua_setfield(L, -2, "version");
+        lua_pushstring(L, plugin->m_description.c_str());
+        lua_setfield(L, -2, "description");
+        lua_rawseti(L, -2, i++);
+    }
+
+    return 1;
+}
+
 static int hlExecCmd(lua_State* L) {
     auto cmd = Internal::argStr(L, 1);
 
@@ -294,6 +330,21 @@ static int hlExecCmd(lua_State* L) {
         return rule.error();
 
     Config::Supplementary::executor()->spawn(Supplementary::SExecRequest{cmd, !*rule, *rule});
+
+    return 0;
+}
+
+static int hlClearCrashedLockscreen(lua_State* L) {
+    if (!g_pSessionLockManager)
+        return Internal::configError(L, "hl.clear_crashed_lockscreen: sessionLockMgr not init'd yet");
+
+    if (!g_pSessionLockManager->isSessionLocked())
+        return Internal::configError(L, "hl.clear_crashed_lockscreen: session is not locked");
+
+    if (g_pSessionLockManager->clientLocked() || g_pSessionLockManager->clientDenied())
+        return Internal::configError(L, "hl.clear_crashed_lockscreen: session is locked with a client, refusing to unlock");
+
+    g_pSessionLockManager->forceUnlock();
 
     return 0;
 }
@@ -339,7 +390,7 @@ static int hlOn(lua_State* L) {
         const auto& known = CLuaEventHandler::knownEvents();
         std::string list;
         for (const auto& e : known) {
-            list += e + ", ";
+            list += std::format("{}, ", e);
         }
         list.pop_back();
         list.pop_back();
@@ -362,6 +413,48 @@ static int hlUnbind(lua_State* L) {
     g_pKeybindManager->removeKeybind(*str);
 
     return 0;
+}
+
+static int hlIsKeyDown(lua_State* L) {
+    if (lua_isinteger(L, 1)) {
+        // Confirm code is valid
+        auto keycode = lua_tointeger(L, 1);
+        if (!xkb_keycode_is_legal_x11(keycode) && !xkb_keycode_is_legal_ext(keycode))
+            return Internal::configError(L, std::format("hl.is_key_down: invalid keycode {}", keycode));
+
+        // Return whether it's pressed or not
+        auto isKeyDown = false;
+        for (auto& k : g_pKeybindManager->m_pressedKeys) {
+            if (k.keycode == keycode) {
+                isKeyDown = true;
+                break;
+            }
+        }
+        lua_pushboolean(L, isKeyDown);
+        return 1;
+    } else if (lua_isstring(L, 1)) {
+        // Parse keysym
+        auto key = std::string(lua_tostring(L, 1));
+        auto sym = xkb_keysym_from_name(key.c_str(), XKB_KEYSYM_NO_FLAGS);
+        if (sym == XKB_KEY_NoSymbol) {
+            if (key == "Enter")
+                return Internal::configError(L, std::format(R"(Unknown keysym: "{}", did you mean "Return"?)", key));
+
+            return Internal::configError(L, std::format("Unknown keysym: \"{}\"", key));
+        }
+
+        // Return whether it's pressed or not
+        auto isKeyDown = false;
+        for (auto& k : g_pKeybindManager->m_pressedKeys) {
+            if (k.keysym == sym) {
+                isKeyDown = true;
+                break;
+            }
+        }
+        lua_pushboolean(L, isKeyDown);
+        return 1;
+    }
+    return Internal::configError(L, std::format("hl.is_key_down: bad argument 1: expected integer or string"));
 }
 
 static int hlTimer(lua_State* L) {
@@ -434,6 +527,11 @@ static int hlTimer(lua_State* L) {
     return 1;
 }
 
+static int hlExecuteScheduledRefreshImmediately(lua_State* L) {
+
+    return Supplementary::refresher()->executeScheduledRefreshImmediately();
+}
+
 void Internal::registerToplevelBindings(lua_State* L, CConfigManager* mgr) {
     Internal::setMgrFn(L, mgr, "on", hlOn);
     Internal::setMgrFn(L, mgr, "bind", hlBind);
@@ -442,7 +540,14 @@ void Internal::registerToplevelBindings(lua_State* L, CConfigManager* mgr) {
 
     Internal::setFn(L, "dispatch", hlDispatch);
     Internal::setFn(L, "version", hlVersion);
+    Internal::setFn(L, "get_loaded_plugins", hlGetPlugins);
     Internal::setFn(L, "exec_cmd", hlExecCmd);
 
+    Internal::setFn(L, "clear_crashed_lockscreen", hlClearCrashedLockscreen);
+
+    Internal::setFn(L, "exec_scheduled_prop_refresh_immediately", hlExecuteScheduledRefreshImmediately);
+
     Internal::setFn(L, "unbind", hlUnbind);
+
+    Internal::setFn(L, "is_key_down", hlIsKeyDown);
 }

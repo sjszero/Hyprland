@@ -19,6 +19,7 @@ commands:
     dismissnotify [amount] → Dismisses all or up to AMOUNT notifications
     dispatch <dispatcher> [args] → Issue a dispatch to call a keybind
                           dispatcher with arguments
+    eval <code>         → Issue a Lua string to execute
     getoption <option>  → Gets the config option status (values)
     globalshortcuts     → Lists all global shortcuts
     hyprpaper ...       → Issue a hyprpaper request
@@ -41,6 +42,8 @@ commands:
     plugin ...          → Issue a plugin request
     reload [config-only] → Issue a reload to force reload the config. Pass
                           'config-only' to disable monitor reload
+    repl [code]         → Enter interactive Lua REPL mode (^D to exit)
+                          or issue a Lua string and print the result
     rollinglog          → Prints tail of the log. Also supports -f/--follow
                           option
     setcursor <theme> <size> → Sets the cursor theme and reloads the cursor
@@ -145,8 +148,7 @@ regex:
     Regular expression by which a window will be searched
 
 property:
-    See https://wiki.hypr.land/Configuring/Using-hyprctl/#setprop for list
-    of properties
+    See the wiki for a list of properties
 
 value:
     Property value
@@ -164,8 +166,7 @@ regex:
     Regular expression by which a window will be searched
 
 property:
-    See https://wiki.hypr.land/Configuring/Using-hyprctl/#setprop for list
-    of properties
+    See the wiki for a list of properties
 
 flags:
     See 'hyprctl --help')#";

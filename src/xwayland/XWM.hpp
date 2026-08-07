@@ -74,7 +74,6 @@ class CXCBConnection {
         if (m_connection) {
             Log::logger->log(Log::DEBUG, "Disconnecting XCB connection {:x}", rc<uintptr_t>(m_connection));
             xcb_disconnect(m_connection);
-            m_connection = nullptr;
         } else
             Log::logger->log(Log::ERR, "Double xcb_disconnect attempt");
     }
@@ -217,7 +216,7 @@ class CXWM {
     std::vector<SP<CX11DataOffer>>            m_dndDataOffers;
 
     inline xcb_connection_t*                  getConnection() {
-        return m_connection ? static_cast<xcb_connection_t*>(*m_connection) : nullptr;
+        return m_connection ? *m_connection : nullptr;
     }
     struct {
         CHyprSignalListener newWLSurface;
