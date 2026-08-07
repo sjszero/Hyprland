@@ -60,7 +60,6 @@ namespace NSplashes {
         "Funny animation compositor woo",
         "4 years!",
         "Beauty will save the world", // 4th ricing comp winner - zacoons' choice
-        "Get good", // 5th ricing comp winner - zacoons' choice
         "Configration",
         "RIP hyprlang",
         "better call vaxry",

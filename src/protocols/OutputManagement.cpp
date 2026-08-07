@@ -3,9 +3,8 @@
 #include "../Compositor.hpp"
 #include "../managers/input/InputManager.hpp"
 #include "../event/EventBus.hpp"
-#include "../output/Monitor.hpp"
+#include "../helpers/Monitor.hpp"
 #include "../config/shared/monitor/MonitorRuleManager.hpp"
-#include "../state/MonitorState.hpp"
 
 using namespace Aquamarine;
 
@@ -35,7 +34,10 @@ COutputManager::COutputManager(SP<CZwlrOutputManagerV1> resource_) : m_resource(
     });
 
     // send all heads at start
-    for (auto const& m : State::monitorState()->allMonitors()) {
+    for (auto const& m : g_pCompositor->m_realMonitors) {
+        if (m == g_pCompositor->m_unsafeOutput)
+            continue;
+
         LOGM(Log::DEBUG, " | sending output head for {}", m->m_name);
 
         makeAndSendNewHead(m);
@@ -68,6 +70,9 @@ void COutputManager::makeAndSendNewHead(PHLMONITOR pMonitor) {
 }
 
 void COutputManager::ensureMonitorSent(PHLMONITOR pMonitor) {
+    if (pMonitor == g_pCompositor->m_unsafeOutput)
+        return;
+
     for (auto const& hw : m_heads) {
         auto h = hw.lock();
 
@@ -94,10 +99,7 @@ COutputHead::COutputHead(SP<CZwlrOutputHeadV1> resource_, PHLMONITOR pMonitor_) 
     m_resource->setRelease([this](CZwlrOutputHeadV1* r) { PROTO::outputManagement->destroyResource(this); });
     m_resource->setOnDestroy([this](CZwlrOutputHeadV1* r) { PROTO::outputManagement->destroyResource(this); });
 
-    m_listeners.monitorDestroy = Event::bus()->m_events.monitor.destroyMon.listen([this](PHLMONITOR m) {
-        if (m != m_monitor)
-            return;
-
+    m_listeners.monitorDestroy = m_monitor->m_events.destroy.listen([this] {
         m_resource->sendFinished();
 
         for (auto const& mw : m_modes) {
@@ -577,7 +579,7 @@ bool COutputConfigurationHead::good() {
 }
 
 COutputManagementProtocol::COutputManagementProtocol(const wl_interface* iface, const int& ver, const std::string& name) : IWaylandProtocol(iface, ver, name) {
-    static auto P = Config::monitorRuleMgr()->m_events.stateReloaded.listen([this] {
+    static auto P = Event::bus()->m_events.monitor.layoutChanged.listen([this] {
         updateAllOutputs();
         sendPendingSuccessEvents();
     });
@@ -616,7 +618,7 @@ void COutputManagementProtocol::destroyResource(COutputConfigurationHead* resour
 }
 
 void COutputManagementProtocol::updateAllOutputs() {
-    for (auto const& m : State::monitorState()->allMonitors()) {
+    for (auto const& m : g_pCompositor->m_realMonitors) {
         for (auto const& mgr : m_managers) {
             mgr->ensureMonitorSent(m);
         }

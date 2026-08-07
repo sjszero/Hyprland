@@ -1,0 +1,65 @@
+#!/bin/sh
+# Anland session launcher for the Debian-patched Hyprland build.
+# It deliberately owns neither PipeWire nor WirePlumber: an existing user
+# session is reused.  Processes started here are stopped when Hyprland exits.
+
+set -eu
+
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR="$runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
+
+children=""
+cleanup() {
+    for pid in $children; do
+        kill "$pid" 2>/dev/null || true
+    done
+}
+trap cleanup EXIT HUP INT TERM
+
+start_if_missing() {
+    socket="$1"
+    shift
+    if [ -S "$socket" ]; then
+        return 0
+    fi
+    "$@" >/dev/null 2>&1 &
+    children="$children $!"
+}
+
+# PipeWire is required by Aquamarine's Anland audio bridge.  Do not create a
+# second graph when a normal desktop session already provides one.
+start_if_missing "$XDG_RUNTIME_DIR/pipewire-0" pipewire
+
+for _ in $(seq 1 20); do
+    [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break
+    sleep 0.05
+done
+
+if ! pgrep -u "$(id -u)" -x wireplumber >/dev/null 2>&1; then
+    wireplumber >/dev/null 2>&1 &
+    children="$children $!"
+fi
+
+# Pulse compatibility is optional; avoid duplicating a daemon supplied by the
+# host session.
+if command -v pipewire-pulse >/dev/null 2>&1 && [ ! -S "$XDG_RUNTIME_DIR/pulse/native" ]; then
+    pipewire-pulse >/dev/null 2>&1 &
+    children="$children $!"
+fi
+
+# DMS is opt-in.  The dedicated launcher is responsible for its user/runtime
+# isolation and waits for the Wayland socket after Hyprland creates it.
+if [ "${ANLAND_DMS:-0}" = 1 ]; then
+    if command -v start-anland-dms >/dev/null 2>&1; then
+        start-anland-dms >/dev/null 2>&1 &
+        children="$children $!"
+    else
+        echo "start-hyprland-anland: ANLAND_DMS=1 but start-anland-dms is unavailable" >&2
+    fi
+fi
+
+/usr/bin/start-hyprland --anland "$@" &
+hyprland_pid=$!
+wait "$hyprland_pid"
+exit $?

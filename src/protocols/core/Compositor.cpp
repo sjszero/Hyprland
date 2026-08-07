@@ -8,33 +8,18 @@
 #include <ranges>
 #include "Subcompositor.hpp"
 #include "../Viewporter.hpp"
-#include "../../output/Monitor.hpp"
+#include "../../helpers/Monitor.hpp"
 #include "../PresentationTime.hpp"
 #include "../DRMSyncobj.hpp"
 #include "../types/DMABuffer.hpp"
 #include "../../render/Renderer.hpp"
 #include "config/ConfigValue.hpp"
 #include "../../managers/eventLoop/EventLoopManager.hpp"
-#include "../../state/MonitorState.hpp"
 #include "protocols/types/SurfaceRole.hpp"
 #include "render/Texture.hpp"
 #include <cstring>
 
 using namespace NColorManagement;
-
-static bool addSafeDamage(CRegion& damage, int32_t x, int32_t y, int32_t w, int32_t h) {
-    if (w <= 0 || h <= 0)
-        return false;
-
-    const int64_t x2 = std::min<int64_t>(sc<int64_t>(x) + w, INT32_MAX);
-    const int64_t y2 = std::min<int64_t>(sc<int64_t>(y) + h, INT32_MAX);
-
-    if (x2 <= x || y2 <= y)
-        return false;
-
-    damage.add(x, y, x2 - x, y2 - y);
-    return true;
-}
 
 class CDefaultSurfaceRole : public ISurfaceRole {
   public:
@@ -95,12 +80,6 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
     m_resource->setOnDestroy([this](CWlSurface* r) { destroy(); });
 
     m_resource->setAttach([this](CWlSurface* r, wl_resource* buffer, int32_t x, int32_t y) {
-        // version is 5 or higher, passing any non-zero x or y is a protocol violation
-        if (m_resource->version() >= 5 && (x != 0 || y != 0)) {
-            r->error(WL_SURFACE_ERROR_INVALID_OFFSET, "attach x and y must be 0 since version 5");
-            return;
-        }
-
         m_pending.updated.bits.buffer = true;
         m_pending.updated.bits.offset = true;
 
@@ -140,44 +119,17 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
         else if (m_pending.viewport.hasSource)
             m_pending.size = m_pending.viewport.source.size();
         else {
-            // without a viewport, at commit time the supplied
-            // buffer size must be an integer multiple of the buffer_scale. If
-            // that's not the case, an invalid_size error is sent.
-            // https://gitlab.freedesktop.org/wayland/wayland/-/issues/194
-            // https://github.com/hyprwm/Hyprland/discussions/15673
-            if (m_role->role() != SURFACE_ROLE_CURSOR && m_role->role() != SURFACE_ROLE_UNASSIGNED) {
-                if (sc<int>(m_pending.bufferSize.x) % m_pending.scale != 0 || sc<int>(m_pending.bufferSize.y) % m_pending.scale != 0) {
-                    r->error(WL_SURFACE_ERROR_INVALID_SIZE, "buffer size is not an integer multiple of the buffer scale");
-                    dropPendingBuffer();
-                    return;
-                }
-            }
-
             Vector2D tfs   = m_pending.transform % 2 == 1 ? Vector2D{m_pending.bufferSize.y, m_pending.bufferSize.x} : m_pending.bufferSize;
             m_pending.size = tfs / m_pending.scale;
         }
 
-        if (m_pending.size.x <= 0 || m_pending.size.y <= 0)
-            m_pending.damage.clear();
-        else
-            m_pending.damage.intersect(CBox{{}, m_pending.size});
+        m_pending.damage.intersect(CBox{{}, m_pending.size});
 
         m_events.precommit.emit();
         if (m_pending.rejected) {
             m_pending.rejected = false;
-            PROTO::presentation->discardFeedbacks(m_pending.presentationFeedbacks);
             dropPendingBuffer();
             return;
-        }
-
-        // a synced subsurface caches its state until the parent commits, so make sure that
-        // commit isnt dropped as empty. mark the t1 parent.
-        if (m_role->role() == SURFACE_ROLE_SUBSURFACE) {
-            const auto SUB = sc<CSubsurfaceRole*>(m_role.get())->m_subsurface.lock();
-            if (SUB && SUB->m_sync && SUB->m_parent) {
-                if (const auto PARENT = SUB->t1Parent())
-                    PARENT->m_pending.updated.bits.subsurface = true;
-            }
         }
 
         // null buffer attached
@@ -198,8 +150,8 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
         m_events.stateCommit.emit(state);
 
         if (state->buffer && state->buffer->type() == Aquamarine::BUFFER_TYPE_DMABUF && state->buffer->dmabuf().success && !state->updated.bits.acquire) {
-            state->buffer->m_syncFds = dc<CDMABuffer*>(state->buffer.m_buffer.get())->exportSyncFiles();
-            if (!state->buffer->m_syncFds.empty())
+            state->buffer->m_syncFd = dc<CDMABuffer*>(state->buffer.m_buffer.get())->exportSyncFile();
+            if (state->buffer->m_syncFd.isValid())
                 m_stateQueue.lock(state, LOCK_REASON_FENCE);
         }
 
@@ -215,20 +167,20 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
     });
 
     m_resource->setDamage([this](CWlSurface* r, int32_t x, int32_t y, int32_t w, int32_t h) {
-        if (addSafeDamage(m_pending.damage, x, y, w, h))
-            m_pending.updated.bits.damage = true;
+        m_pending.updated.bits.damage = true;
+        m_pending.damage.add(CBox{x, y, w, h});
     });
     m_resource->setDamageBuffer([this](CWlSurface* r, int32_t x, int32_t y, int32_t w, int32_t h) {
-        if (addSafeDamage(m_pending.bufferDamage, x, y, w, h))
-            m_pending.updated.bits.damage = true;
+        m_pending.updated.bits.damage = true;
+        const auto damageSize         = Vector2D(w, h);
+
+        if (damageSize > m_pending.bufferSize)
+            m_pending.bufferDamage.add(CBox{{x, y}, m_pending.bufferSize});
+        else
+            m_pending.bufferDamage.add(CBox{{x, y}, damageSize});
     });
 
     m_resource->setSetBufferScale([this](CWlSurface* r, int32_t scale) {
-        if (scale <= 0) {
-            r->error(WL_SURFACE_ERROR_INVALID_SCALE, "buffer scale must be positive");
-            return;
-        }
-
         if (scale == m_pending.scale)
             return;
 
@@ -240,11 +192,6 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
     });
 
     m_resource->setSetBufferTransform([this](CWlSurface* r, uint32_t tr) {
-        if (tr > WL_OUTPUT_TRANSFORM_FLIPPED_270) {
-            r->error(WL_SURFACE_ERROR_INVALID_TRANSFORM, "invalid buffer transform");
-            return;
-        }
-
         if (tr == m_pending.transform)
             return;
 
@@ -259,14 +206,12 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
         m_pending.updated.bits.input = true;
 
         if (!region) {
-            m_pending.inputIsInfinite = true;
-            m_pending.input.clear();
+            m_pending.input = CBox{{}, Vector2D{INT32_MAX - 1, INT32_MAX - 1}};
             return;
         }
 
-        auto RG                   = CWLRegionResource::fromResource(region);
-        m_pending.inputIsInfinite = false;
-        m_pending.input           = RG->m_region;
+        auto RG         = CWLRegionResource::fromResource(region);
+        m_pending.input = RG->m_region;
     });
 
     m_resource->setSetOpaqueRegion([this](CWlSurface* r, wl_resource* region) {
@@ -293,19 +238,10 @@ CWLSurfaceResource::CWLSurfaceResource(SP<CWlSurface> resource_) : m_resource(re
 }
 
 CWLSurfaceResource::~CWLSurfaceResource() {
-    discardPresentationFeedbacks();
     m_events.destroy.emit();
 }
 
-void CWLSurfaceResource::discardPresentationFeedbacks() {
-    PROTO::presentation->discardFeedbacks(m_pending.presentationFeedbacks);
-    PROTO::presentation->discardFeedbacks(m_current.presentationFeedbacks);
-    PROTO::presentation->discardFeedbacksForSurface(m_self);
-}
-
 void CWLSurfaceResource::destroy() {
-    discardPresentationFeedbacks();
-
     if (m_mapped) {
         m_events.unmap.emit();
         unmap();
@@ -390,18 +326,14 @@ void CWLSurfaceResource::leave(PHLMONITOR monitor) {
 }
 
 void CWLSurfaceResource::sendPreferredTransform(wl_output_transform t) {
-    if (m_resource->version() < 6 || (m_lastTransform && *m_lastTransform == t))
+    if (m_resource->version() < 6)
         return;
-
-    m_lastTransform = t;
     m_resource->sendPreferredBufferTransform(t);
 }
 
 void CWLSurfaceResource::sendPreferredScale(int32_t scale) {
-    if (m_resource->version() < 6 || scale == m_lastScale.value_or(-1))
+    if (m_resource->version() < 6)
         return;
-
-    m_lastScale = scale;
     m_resource->sendPreferredBufferScale(scale);
 }
 
@@ -526,7 +458,7 @@ SP<CWLSurfaceResource> CWLSurfaceResource::findWithCM() {
 
 std::pair<SP<CWLSurfaceResource>, Vector2D> CWLSurfaceResource::at(const Vector2D& localCoords, bool allowsInput) {
     std::vector<std::pair<SP<CWLSurfaceResource>, Vector2D>> surfs;
-    breadthfirst([&surfs](SP<CWLSurfaceResource> surf, const Vector2D& offset, void* data) { surfs.emplace_back(surf, offset); }, &surfs);
+    breadthfirst([&surfs](SP<CWLSurfaceResource> surf, const Vector2D& offset, void* data) { surfs.emplace_back(std::make_pair<>(surf, offset)); }, &surfs);
 
     for (auto const& [surf, pos] : surfs | std::views::reverse) {
         if (!allowsInput) {
@@ -534,7 +466,7 @@ std::pair<SP<CWLSurfaceResource>, Vector2D> CWLSurfaceResource::at(const Vector2
             if (BOX.containsPoint(localCoords))
                 return {surf, localCoords - pos};
         } else {
-            const auto REGION = surf->m_current.effectiveInputRegion().translate(pos);
+            const auto REGION = surf->m_current.input.copy().intersect(CBox{{}, surf->m_current.size}).translate(pos);
             if (REGION.containsPoint(localCoords))
                 return {surf, localCoords - pos};
         }
@@ -563,13 +495,7 @@ void CWLSurfaceResource::unmap() {
     if UNLIKELY (!m_mapped)
         return;
 
-    // unmapped content will never be displayed: terminate outstanding feedbacks,
-    // or clients blocking on them (present_wait) stall forever.
-    discardPresentationFeedbacks();
-
-    m_mapped        = false;
-    m_lastTransform = std::nullopt;
-    m_lastScale     = std::nullopt;
+    m_mapped = false;
 
     // release the buffers.
     // this is necessary for XWayland to function correctly,
@@ -605,59 +531,39 @@ CBox CWLSurfaceResource::extends() {
 }
 
 void CWLSurfaceResource::scheduleState(WP<SSurfaceState> state) {
-    auto whenReadable = [this, surf = m_self](WP<SSurfaceState> state) {
+    auto whenReadable = [this, surf = m_self](auto state, auto reason) {
         if (!surf || !state)
             return;
 
-        m_stateQueue.unlockFence(state);
+        m_stateQueue.unlock(state, reason);
     };
 
     if (state->updated.bits.acquire) {
-        auto waiter = state->acquire.addWaiter([state, whenReadable]() { whenReadable(state); });
-        // the waiter may have fired (and dropped this state), so re check.
-        if (state) {
-            state->acquireWaiter = waiter;
-            // a null waiter means it either fired immediately or failed to register
-            if (!waiter)
-                whenReadable(state);
+        // wait on acquire point for this surface, from explicit sync protocol
+        if (!state->acquire.addWaiter([state, whenReadable]() { whenReadable(state, LOCK_REASON_FENCE); })) {
+            Log::logger->log(Log::ERR, "Failed to addWaiter in CWLSurfaceResource::scheduleState");
+            whenReadable(state, LOCK_REASON_FENCE);
         }
     } else if (state->buffer && state->buffer->isSynchronous()) {
         // synchronous (shm) buffers can be read immediately
-        m_stateQueue.unlockFence(state);
-    } else if (state->buffer && !state->buffer->m_syncFds.empty()) {
+        m_stateQueue.unlock(state, LOCK_REASON_FENCE);
+    } else if (state->buffer && state->buffer->m_syncFd.isValid()) {
         // async buffer and is dmabuf, then we can wait on implicit fences
-        drainSyncFds(state, LOCK_REASON_FENCE);
+        g_pEventLoopManager->doOnReadable(std::move(state->buffer->m_syncFd), [state, whenReadable]() { whenReadable(state, LOCK_REASON_FENCE); });
     } else {
         // state commit without a buffer.
         m_stateQueue.tryProcess();
     }
 }
 
-void CWLSurfaceResource::drainSyncFds(WP<SSurfaceState> state, eLockReason reason) {
-    auto& fds = state->buffer->m_syncFds;
-
-    std::erase_if(fds, [](const auto& fd) { return fd.isReadable(); });
-
-    if (!fds.empty()) {
-        auto fd = std::move(fds.front());
-        fds.erase(fds.begin());
-        auto waiter = g_pEventLoopManager->doOnReadable(std::move(fd), [this, surf = m_self, state, reason]() {
-            if (!surf || !state)
-                return;
-
-            drainSyncFds(state, reason);
-        });
-
-        if (state)
-            state->acquireWaiter = waiter;
-        return;
-    }
-
-    m_stateQueue.unlockFence(state);
-}
-
 void CWLSurfaceResource::commitState(SSurfaceState& state) {
-    if (!state.updated.all && m_mapped)
+    // TODO might be incorrect. needed for VRR with FIFO to avoid same buffer extra frames for second commit when it's used in this way:
+    // wp_fifo_v1#43.set_barrier()
+    // wp_fifo_v1#43.wait_barrier()
+    // wl_surface#3.commit()
+    // wp_fifo_v1#43.wait_barrier()
+    // wl_surface#3.commit()
+    if (!state.updated.all && m_mapped && state.fifoScheduled)
         return;
 
     auto lastTexture = m_current.texture;
@@ -714,7 +620,7 @@ PImageDescription CWLSurfaceResource::getPreferredImageDescription() {
         auto subsurface = sc<CSubsurfaceRole*>(parent->m_role.get())->m_subsurface.lock();
         parent          = subsurface->t1Parent();
     }
-    PHLMONITORREF monitor;
+    WP<CMonitor> monitor;
     if (parent->m_enteredOutputs.size() == 1)
         monitor = parent->m_enteredOutputs[0];
     else if (m_hlSurface.valid() && WINDOW)
@@ -763,7 +669,7 @@ bool CWLSurfaceResource::hasVisibleSubsurface() {
 
 bool CWLSurfaceResource::isTearing() {
     if (m_enteredOutputs.empty() && m_hlSurface) {
-        for (auto& m : State::monitorState()->monitors()) {
+        for (auto& m : g_pCompositor->m_monitors) {
             if (!m || !m->m_enabled)
                 continue;
 
@@ -815,11 +721,10 @@ void CWLSurfaceResource::updateCursorShm(CRegion damage) {
     if (rectsNum == 1 && rects[0].x2 == buf->size.x && rects[0].y2 == buf->size.y)
         memcpy(shmData.data(), pixelData, bufLen);
     else {
-        const auto stride = shmAttrs.stride;
-        damage.forEachRect([&pixelData, &shmData, stride](const auto& box) {
+        damage.forEachRect([&pixelData, &shmData](const auto& box) {
             for (auto y = box.y1; y < box.y2; ++y) {
                 // bpp is 32 INSALLAH
-                auto begin = y * stride + 4 * box.x1;
+                auto begin = 4 * box.y1 * (box.x2 - box.x1) + box.x1;
                 auto len   = 4 * (box.x2 - box.x1);
                 memcpy(shmData.data() + begin, pixelData + begin, len);
             }
@@ -830,23 +735,17 @@ void CWLSurfaceResource::updateCursorShm(CRegion damage) {
 void CWLSurfaceResource::presentFeedback(const Time::steady_tp& when, PHLMONITOR pMonitor, bool discarded) {
     frame(when);
 
-    // if it's empty then CPresentationProtocol::m_feedbacks doesn't contain any feedback listeners for this surface and frame
-    if (m_current.presentationFeedbacks.empty())
-        return;
-
-    // discarded content will never be scanned out, so there is no present event coming.
-    if (discarded) {
-        PROTO::presentation->discardFeedbacks(m_current.presentationFeedbacks);
-        return;
-    }
-
-    auto FEEDBACK = makeUnique<CQueuedPresentationData>(m_self.lock(), std::move(m_current.presentationFeedbacks));
+    auto FEEDBACK = makeUnique<CQueuedPresentationData>(m_self.lock());
     FEEDBACK->attachMonitor(pMonitor);
-    FEEDBACK->presented();
-    if (!pMonitor->m_lastScanout.expired()) {
-        const auto WINDOW = m_hlSurface ? Desktop::View::CWindow::fromView(m_hlSurface->view()) : nullptr;
-        if (WINDOW == pMonitor->m_lastScanout)
-            FEEDBACK->setPresentationType(true);
+    if (discarded)
+        FEEDBACK->discarded();
+    else {
+        FEEDBACK->presented();
+        if (!pMonitor->m_lastScanout.expired()) {
+            const auto WINDOW = m_hlSurface ? Desktop::View::CWindow::fromView(m_hlSurface->view()) : nullptr;
+            if (WINDOW == pMonitor->m_lastScanout)
+                FEEDBACK->setPresentationType(true);
+        }
     }
     PROTO::presentation->queueData(std::move(FEEDBACK));
 }

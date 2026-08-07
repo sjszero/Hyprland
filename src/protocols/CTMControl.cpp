@@ -4,11 +4,9 @@
 #include "core/Output.hpp"
 #include "../config/ConfigValue.hpp"
 #include "../config/shared/animation/AnimationTree.hpp"
-#include "animation/AnimationManager.hpp"
-#include "../output/Monitor.hpp"
+#include "managers/animation/AnimationManager.hpp"
+#include "../helpers/Monitor.hpp"
 #include "../helpers/MiscFunctions.hpp"
-#include "../state/MonitorState.hpp"
-#include <cmath>
 
 CHyprlandCTMControlResource::CHyprlandCTMControlResource(UP<CHyprlandCtmControlManagerV1>&& resource_) : m_resource(std::move(resource_)) {
     if UNLIKELY (!good())
@@ -53,7 +51,7 @@ CHyprlandCTMControlResource::CHyprlandCTMControlResource(UP<CHyprlandCtmControlM
 
         LOGM(Log::DEBUG, "Committing ctms to outputs");
 
-        for (auto& m : State::monitorState()->monitors()) {
+        for (auto& m : g_pCompositor->m_monitors) {
             if (!m_ctms.contains(m->m_name)) {
                 PROTO::ctm->setCTM(m, Mat3x3::identity());
                 continue;
@@ -75,7 +73,7 @@ CHyprlandCTMControlResource::~CHyprlandCTMControlResource() {
     if (m_blocked)
         return;
 
-    for (auto& m : State::monitorState()->monitors()) {
+    for (auto& m : g_pCompositor->m_monitors) {
         PROTO::ctm->setCTM(m, Mat3x3::identity());
     }
 }
@@ -122,7 +120,7 @@ bool CHyprlandCTMControlProtocol::isCTMAnimationEnabled() {
 }
 
 CHyprlandCTMControlProtocol::SCTMData::SCTMData() {
-    Animation::mgr()->createAnimation(0.f, progress, Config::animationTree()->getAnimationPropertyConfig("__internal_fadeCTM"), AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(0.f, progress, Config::animationTree()->getAnimationPropertyConfig("__internal_fadeCTM"), AVARDAMAGE_NONE);
 }
 
 void CHyprlandCTMControlProtocol::setCTM(PHLMONITOR monitor, const Mat3x3& ctm) {
@@ -154,9 +152,11 @@ void CHyprlandCTMControlProtocol::setCTM(PHLMONITOR monitor, const Mat3x3& ctm) 
         const auto           to       = data->ctmTo.getMatrix();
         const auto           PROGRESS = data->progress->getPercent();
 
+        static const auto    lerp = [](const float one, const float two, const float progress) -> float { return one + (two - one) * progress; };
+
         std::array<float, 9> mtx;
         for (size_t i = 0; i < 9; ++i) {
-            mtx[i] = std::lerp(from[i], to[i], PROGRESS);
+            mtx[i] = lerp(from[i], to[i], PROGRESS);
         }
 
         monitor->setCTM(mtx);

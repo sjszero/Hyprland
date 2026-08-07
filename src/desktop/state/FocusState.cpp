@@ -3,13 +3,12 @@
 #include "../../Compositor.hpp"
 #include "../../protocols/XDGShell.hpp"
 #include "../../render/Renderer.hpp"
-#include "../../ipc/s2/S2.hpp"
+#include "../../managers/EventManager.hpp"
 #include "../../managers/input/InputManager.hpp"
 #include "../../managers/SeatManager.hpp"
 #include "../../xwayland/XSurface.hpp"
 #include "../../protocols/PointerConstraints.hpp"
-#include "animation/WorkspaceAnimationController.hpp"
-#include "../../managers/fullscreen/FullscreenController.hpp"
+#include "managers/animation/DesktopAnimationManager.hpp"
 #include "../../layout/LayoutManager.hpp"
 #include "../../event/EventBus.hpp"
 
@@ -29,18 +28,17 @@ struct SFullscreenWorkspaceFocusResult {
 };
 
 static SFullscreenWorkspaceFocusResult onFullscreenWorkspaceFocusWindow(PHLWINDOW pWindow, bool forceFSCycle) {
-    const auto FSWINDOW        = Fullscreen::controller()->getFullscreenWindow(pWindow->m_workspace);
-    const auto FSMODE_INTERNAL = Fullscreen::controller()->getFullscreenModes(pWindow->m_workspace).internal;
-    const auto LAYOUT_HANDLED  = Fullscreen::controller()->layoutManagedFS(FSWINDOW);
+    const auto FSWINDOW = pWindow->m_workspace->getFullscreenWindow();
+    const auto FSMODE   = pWindow->m_workspace->m_fullscreenMode;
 
     if (pWindow == FSWINDOW)
         return {}; // no conflict
 
     if (pWindow->m_isFloating) {
         // if the window is floating, just bring it to the top
-        pWindow->m_allowedOverFullscreen = true;
+        pWindow->m_createdOverFullscreen = true;
         pWindow->updateFullscreenInputState();
-        Animation::Workspace::setFullscreenFloatingFade(pWindow, 1.F);
+        g_pDesktopAnimationManager->setFullscreenFloatingFade(pWindow, 1.f);
         g_pHyprRenderer->damageWindow(pWindow);
         return {};
     }
@@ -54,14 +52,14 @@ static SFullscreenWorkspaceFocusResult onFullscreenWorkspaceFocusWindow(PHLWINDO
         case 2:
             // undo fs, unless we force a cycle
             if (!forceFSCycle) {
-                Fullscreen::controller()->setFullscreenMode(FSWINDOW, Fullscreen::FSMODE_NONE);
+                g_pCompositor->setWindowFullscreenInternal(FSWINDOW, FSMODE_NONE);
                 break;
             }
             [[fallthrough]];
         case 1:
-            // replace fullscreen using the layoutHandled mode from prev FS window
-            Fullscreen::controller()->setFullscreenMode(FSWINDOW, Fullscreen::FSMODE_NONE);
-            Fullscreen::controller()->setFullscreenMode(pWindow, FSMODE_INTERNAL, std::nullopt, LAYOUT_HANDLED);
+            // replace fullscreen
+            g_pCompositor->setWindowFullscreenInternal(FSWINDOW, FSMODE_NONE);
+            g_pCompositor->setWindowFullscreenInternal(pWindow, FSMODE);
             break;
 
         default: Log::logger->log(Log::ERR, "Invalid misc:on_focus_under_fullscreen mode: {}", *PONFOCUSUNDERFS); break;
@@ -75,8 +73,8 @@ void CFocusState::fullWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWL
         if (!pWindow->m_workspace)
             return;
 
-        const auto FSWINDOW = Fullscreen::controller()->getFullscreenWindow(pWindow->m_workspace);
-        if (FSWINDOW && !Fullscreen::controller()->layoutManagedFS(FSWINDOW)) {
+        const auto CURRENT_FS_MODE = pWindow->m_workspace->m_hasFullscreenWindow ? pWindow->m_workspace->m_fullscreenMode : FSMODE_NONE;
+        if (CURRENT_FS_MODE != FSMODE_NONE) {
             const auto RESULT = onFullscreenWorkspaceFocusWindow(pWindow, forceFSCycle);
             if (RESULT.overrideFocusWindow)
                 pWindow = RESULT.overrideFocusWindow;
@@ -97,7 +95,7 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
     static auto PFOLLOWMOUSE        = CConfigValue<Config::INTEGER>("input:follow_mouse");
     static auto PSPECIALFALLTHROUGH = CConfigValue<Config::INTEGER>("input:special_fallthrough");
 
-    if (pWindow == m_focusWindow && surface == m_focusSurface && m_focusSurface)
+    if (pWindow == m_focusWindow && surface == m_focusSurface)
         return;
 
     if (!pWindow || !pWindow->priorityFocus()) {
@@ -136,8 +134,8 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
 
         g_pSeatManager->setKeyboardFocus(nullptr);
 
-        IPC::Socket2::sock()->postEvent({"activewindow", ","});
-        IPC::Socket2::sock()->postEvent({"activewindowv2", ""});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activewindow", ","});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activewindowv2", ""});
 
         Event::bus()->m_events.window.active.emit(nullptr, reason);
 
@@ -194,6 +192,7 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
     }
 
     const auto PWINDOWSURFACE = surface ? surface : pWindow->wlSurface()->resource();
+
     rawSurfaceFocus(PWINDOWSURFACE, pWindow);
 
     g_pXWaylandManager->activateWindow(pWindow, true); // sets the m_pLastWindow
@@ -206,8 +205,8 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
         pWindow->m_isUrgent = false;
 
     // Send an event
-    IPC::Socket2::sock()->postEvent({.event = "activewindow", .data = std::format("{},{}", pWindow->m_class, pWindow->m_title)});
-    IPC::Socket2::sock()->postEvent({.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindow", .data = pWindow->m_class + "," + pWindow->m_title});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
 
     Event::bus()->m_events.window.active.emit(pWindow, reason);
 
@@ -240,8 +239,8 @@ void CFocusState::rawSurfaceFocus(SP<CWLSurfaceResource> pSurface, PHLWINDOW pWi
 
     if (!pSurface) {
         g_pSeatManager->setKeyboardFocus(nullptr);
-        IPC::Socket2::sock()->postEvent({.event = "activewindow", .data = ","});
-        IPC::Socket2::sock()->postEvent({.event = "activewindowv2", .data = ""});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindow", .data = ","});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindowv2", .data = ""});
         Event::bus()->m_events.input.keyboard.focus.emit(nullptr);
         m_focusSurface.reset();
         return;
@@ -284,8 +283,8 @@ void CFocusState::rawMonitorFocus(PHLMONITOR pMonitor) {
     const auto WORKSPACE_ID   = PWORKSPACE ? std::to_string(PWORKSPACE->m_id) : std::to_string(WORKSPACE_INVALID);
     const auto WORKSPACE_NAME = PWORKSPACE ? PWORKSPACE->m_name : "?";
 
-    IPC::Socket2::sock()->postEvent({.event = "focusedmon", .data = std::format("{},{}", pMonitor->m_name, WORKSPACE_NAME)});
-    IPC::Socket2::sock()->postEvent({.event = "focusedmonv2", .data = std::format("{},{}", pMonitor->m_name, WORKSPACE_ID)});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "focusedmon", .data = pMonitor->m_name + "," + WORKSPACE_NAME});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "focusedmonv2", .data = pMonitor->m_name + "," + WORKSPACE_ID});
 
     Event::bus()->m_events.monitor.focused.emit(pMonitor);
     m_focusMonitor = pMonitor;
@@ -306,21 +305,6 @@ PHLMONITOR CFocusState::monitor() {
 void CFocusState::resetWindowFocus() {
     m_focusWindow.reset();
     m_focusSurface.reset();
-}
-
-bool CFocusState::isWindowActive(PHLWINDOW pWindow) const {
-    const auto FOCUSWINDOW  = m_focusWindow.lock();
-    const auto FOCUSSURFACE = m_focusSurface.lock();
-
-    if (!FOCUSWINDOW && !FOCUSSURFACE)
-        return false;
-
-    if (!pWindow || !pWindow->m_isMapped)
-        return false;
-
-    const auto PSURFACE = pWindow->wlSurface()->resource();
-
-    return PSURFACE == FOCUSSURFACE || pWindow == FOCUSWINDOW;
 }
 
 bool Desktop::isHardInputFocusReason(eFocusReason r) {

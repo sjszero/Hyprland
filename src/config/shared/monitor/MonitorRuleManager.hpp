@@ -26,11 +26,9 @@ namespace Config {
         const std::vector<CMonitorRule>& all();
         std::vector<CMonitorRule>&       allMut();
 
-        struct {
-            CSignalT<> stateReloaded;
-        } m_events;
-
       private:
+        void                      performMonitorReload();
+
         std::vector<CMonitorRule> m_rules;
         bool                      m_reloadScheduled = false;
 

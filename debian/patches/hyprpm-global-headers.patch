@@ -1,0 +1,149 @@
+From: Constantin Piber <cp.piber@gmail.com>
+Date: Tue, 18 Nov 2025 15:43:15 +0800
+Subject: Find global headers
+
+Have hyprpm find global headers installed with the package instead of requiring
+a separate clone.
+
+Origin: https://github.com/cpiber/hyprland-ppa/blob/0dcd5f3101f7ced40879d0f34f337b1a2cdd79ae/hyprland/debian/patches/99-hyprpm-global-headers
+Forwarded: not-needed
+
+Co-authored-by: Chow Loong Jin <hyperair@debian.org>
+---
+ hyprpm/CMakeLists.txt             |  1 +
+ hyprpm/src/core/DataState.cpp     |  8 +++++++-
+ hyprpm/src/core/PluginManager.cpp | 18 +++++++++++++-----
+ 3 files changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/hyprpm/CMakeLists.txt b/hyprpm/CMakeLists.txt
+index aefb71b..27748ef 100644
+--- a/hyprpm/CMakeLists.txt
++++ b/hyprpm/CMakeLists.txt
+@@ -27,6 +27,7 @@ if (NOT glaze_FOUND)
+ endif()
+ 
+ add_executable(hyprpm ${SRCFILES})
++add_compile_definitions(LIBDIR="${CMAKE_INSTALL_FULL_LIBDIR}")
+ 
+ target_link_libraries(hyprpm PUBLIC PkgConfig::hyprpm_deps glaze::glaze)
+ 
+diff --git a/hyprpm/src/core/DataState.cpp b/hyprpm/src/core/DataState.cpp
+index 64f3cfa..3bb760b 100644
+--- a/hyprpm/src/core/DataState.cpp
++++ b/hyprpm/src/core/DataState.cpp
+@@ -42,7 +42,7 @@ std::filesystem::path DataState::getDataStatePath() {
+ }
+ 
+ std::string DataState::getHeadersPath() {
+-    return getDataStatePath() / "headersRoot";
++    return "/usr";
+ }
+ 
+ std::vector<std::filesystem::path> DataState::getPluginStates() {
+@@ -64,19 +64,25 @@ std::vector<std::filesystem::path> DataState::getPluginStates() {
+ 
+ void DataState::ensureStateStoreExists() {
+     std::error_code ec;
++#if 0
++    // note: getHeadersPath() has been patched to `/usr` and is no longer a
++    // subpath of getDataStatePath()
+     if (!std::filesystem::exists(getHeadersPath(), ec) || ec) {
+         std::println("{}", infoString("The hyprpm state store doesn't exist. Creating now..."));
+         if (!std::filesystem::exists("/var/cache/hyprpm/", ec) || ec) {
+             if (!NSys::root::createDirectory("/var/cache/hyprpm", "755"))
+                 Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
+         }
++#endif
+         if (!std::filesystem::exists(getDataStatePath(), ec) || ec) {
+             if (!NSys::root::createDirectory(getDataStatePath().string(), "755"))
+                 Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
+         }
++#if 0
+         if (!NSys::root::createDirectory(getHeadersPath(), "755"))
+             Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
+     }
++#endif
+ }
+ 
+ void DataState::addNewPluginRepo(const SPluginRepository& repo) {
+diff --git a/hyprpm/src/core/PluginManager.cpp b/hyprpm/src/core/PluginManager.cpp
+index 6621a49..5cc2bbe 100644
+--- a/hyprpm/src/core/PluginManager.cpp
++++ b/hyprpm/src/core/PluginManager.cpp
+@@ -402,8 +402,10 @@ bool CPluginManager::removePluginRepo(const SPluginRepoIdentifier identifier) {
+ eHeadersErrors CPluginManager::headersValid() {
+     const auto HLVER = getHyprlandVersion(false);
+ 
++#if 0  // disable hyprland.pc check, let pkgconf handle it
+     if (!std::filesystem::exists(DataState::getHeadersPath() + "/share/pkgconfig/hyprland.pc"))
+         return HEADERS_MISSING;
++#endif
+ 
+     // find headers commit
+     const std::string& cmd     = std::format("PKG_CONFIG_PATH=\"{}\" pkgconf --cflags --keep-system-cflags hyprland", getPkgConfigPath());
+@@ -479,6 +481,7 @@ bool CPluginManager::updateHeaders(bool force) {
+         std::filesystem::permissions(getTempRoot(), std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+     }
+ 
++#if 0  // disable hyprland cloning for system package
+     if (!force && headersValid() == HEADERS_OK) {
+         std::println("\n{}", successString("Headers up to date."));
+         return true;
+@@ -612,14 +615,17 @@ bool CPluginManager::updateHeaders(bool force) {
+ 
+     // remove build files
+     std::filesystem::remove_all(WORKINGDIR);
++#endif  // disable hyprland cloning for system package
+ 
+     auto HEADERSVALID = headersValid();
+ 
+     if (HEADERSVALID == HEADERS_OK || HEADERSVALID == HEADERS_MISMATCHED || HEADERSVALID == HEADERS_ABI_MISMATCH) {
++#if 0  // disabled in favour of system package headers
+         progress.printMessageAbove(successString("installed headers"));
+         progress.m_iSteps           = 5;
+         progress.m_szCurrentMessage = "Done!";
+         progress.print();
++#endif  // disabled in favour of system package headers
+ 
+         auto GLOBALSTATE               = DataState::getGlobalState();
+         GLOBALSTATE.headersAbiCompiled = HLVER.abiHash;
+@@ -627,13 +633,15 @@ bool CPluginManager::updateHeaders(bool force) {
+ 
+         std::print("\n");
+     } else {
++#if 0  // disabled in favour of system package headers
+         progress.printMessageAbove(failureString("failed to install headers with error code {} ({})", sc<int>(HEADERSVALID), headerErrorShort(HEADERSVALID)));
+         progress.printMessageAbove(infoString("if the problem persists, try running hyprpm purge-cache."));
+         progress.m_iSteps           = 5;
+         progress.m_szCurrentMessage = "Failed";
+         progress.print();
++#endif  // disabled in favour of system package headers
+ 
+-        std::print(stderr, "\n\n{}", headerError(HEADERSVALID));
++        std::print(stderr, "{}", headerError(HEADERSVALID));
+ 
+         return false;
+     }
+@@ -990,10 +998,10 @@ void CPluginManager::notify(const eNotifyIcons icon, uint32_t color, int duratio
+ 
+ std::string CPluginManager::headerError(const eHeadersErrors err) {
+     switch (err) {
+-        case HEADERS_CORRUPTED: return failureString("Headers corrupted. Please run hyprpm update to fix those.\n");
+-        case HEADERS_MISMATCHED: return failureString("Headers version mismatch. Please run hyprpm update to fix those.\n");
++        case HEADERS_CORRUPTED: return failureString("Headers corrupted. Please file a bug against your distribution's hyprland package.\n");
++        case HEADERS_MISMATCHED: return failureString("Headers version mismatch. Please file a bug against your distribution's hyprland package.\n");
+         case HEADERS_NOT_HYPRLAND: return failureString("It doesn't seem you are running on hyprland.\n");
+-        case HEADERS_MISSING: return failureString("Headers missing. Please run hyprpm update to fix those.\n");
++        case HEADERS_MISSING: return failureString("Headers missing. Please ensure hyprland-dev is installed and run hyprpm update to fix this.\n");
+         case HEADERS_ABI_MISMATCH: return failureString("ABI is mismatched. Please run hyprpm update to fix that.\n");
+         case HEADERS_DUPLICATED: {
+             return failureString("Headers duplicated!!! This is a very bad sign.\n"
+@@ -1036,7 +1044,7 @@ bool CPluginManager::hasDeps() {
+ }
+ 
+ const std::string& CPluginManager::getPkgConfigPath() {
+-    static const auto str = std::format("{}/share/pkgconfig:$PKG_CONFIG_PATH", DataState::getHeadersPath());
++    static const std::string str { LIBDIR "/pkgconfig:$PKG_CONFIG_PATH" };
+     return str;
+ }
+ 

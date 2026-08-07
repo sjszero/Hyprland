@@ -29,7 +29,6 @@ namespace Render::GL {
 
       private:
         GLuint m_fb      = -1;
-        bool   m_tempBuf = false;
         bool   m_cleared = false;
 
         friend class CGLRenderbuffer;

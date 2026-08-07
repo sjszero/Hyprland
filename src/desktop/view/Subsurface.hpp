@@ -4,13 +4,12 @@
 #include <vector>
 #include "WLSurface.hpp"
 #include "View.hpp"
-#include "types/Geometric.hpp"
 
 class CWLSubsurfaceResource;
 
 namespace Desktop::View {
     class CPopup;
-    class CSubsurface : public virtual IView, public virtual IGeometric {
+    class CSubsurface : public IView {
       public:
         // root dummy nodes
         static SP<CSubsurface> create(PHLWINDOW pOwner);
@@ -29,9 +28,6 @@ namespace Desktop::View {
         virtual std::optional<CBox>    logicalBox() const;
         virtual bool                   desktopComponent() const;
         virtual std::optional<CBox>    surfaceLogicalBox() const;
-        virtual Vector2D               position(eGeometricValueType) const override;
-        virtual Vector2D               size(eGeometricValueType) const override;
-        virtual CBox                   geometricBox(eGeometricValueType) const override;
 
         Vector2D                       coordsRelativeToParent() const;
         Vector2D                       coordsGlobal() const;
@@ -78,7 +74,6 @@ namespace Desktop::View {
 
         void                                        initSignals();
         void                                        initExistingSubsurfaces(SP<CWLSurfaceResource> pSurface);
-        void                                        syncScaleTransform() const;
         void                                        checkSiblingDamage();
         void                                        damageLastArea();
     };

@@ -10,11 +10,8 @@
 #include "../devices/ITouch.hpp"
 
 #include "../desktop/DesktopTypes.hpp"
-#include "../desktop/view/View.hpp"
 
 #include "../SharedDefs.hpp"
-#include <unordered_map>
-#include <variant>
 
 namespace Desktop {
     enum eFocusReason : uint8_t;
@@ -22,11 +19,6 @@ namespace Desktop {
 namespace Event {
     struct SCallbackInfo {
         bool cancelled = false; /* on cancellable events, will cancel the event. */
-    };
-
-    struct SViewDestroyEvent {
-        PHLVIEWREF               view;
-        Desktop::View::eViewType type = Desktop::View::VIEW_TYPE_WINDOW;
     };
 
     class CEventBus {
@@ -40,33 +32,6 @@ namespace Event {
         template <typename... Args>
         using Cancellable = CSignalT<Args..., SCallbackInfo&>;
 
-        class CCustomEvent {
-          public:
-            // maps a name to a ValidVariant
-            // must have the same order as ValidVariant
-            enum eType : uint8_t {
-                TYPE_BOOL          = 0,
-                TYPE_INT           = 1,
-                TYPE_DOUBLE        = 2,
-                TYPE_STRING        = 3,
-                TYPE_WINDOW        = 4,
-                TYPE_WORKSPACE     = 5,
-                TYPE_LAYER_SURFACE = 6,
-                TYPE_MONITOR       = 7,
-            };
-
-            using ValidVariant = std::variant<bool, int, double, std::string, PHLWINDOWREF, PHLWORKSPACEREF, PHLLSREF, PHLMONITORREF>;
-
-            CCustomEvent(std::string name, std::vector<eType> argTypes);
-            ~CCustomEvent();
-
-            std::expected<void, std::string>        emit(const std::vector<ValidVariant>& args);
-
-            std::string                             m_name;
-            std::vector<eType>                      m_argTypes;
-            Event<const std::vector<ValidVariant>&> m_event;
-        };
-
         struct {
             Event<> ready;
             Event<> tick;
@@ -74,11 +39,9 @@ namespace Event {
             Event<> exit;
 
             struct {
-                Event<PHLWINDOW>                        create;
                 Event<PHLWINDOW>                        open;
                 Event<PHLWINDOW>                        openEarly;
-                Event<PHLWINDOW>                        openLate;
-                Event<PHLWINDOWREF>                     destroy;
+                Event<PHLWINDOW>                        destroy;
                 Event<PHLWINDOW>                        close;
                 Event<PHLWINDOW>                        kill;
                 Event<PHLWINDOW, Desktop::eFocusReason> active;
@@ -87,10 +50,8 @@ namespace Event {
                 Event<PHLWINDOW>                        class_;
                 Event<PHLWINDOW>                        pin;
                 Event<PHLWINDOW>                        fullscreen;
-                Event<PHLWINDOW>                        floating;
                 Event<PHLWINDOW>                        updateRules;
                 Event<PHLWINDOW, PHLWORKSPACE>          moveToWorkspace;
-                Cancellable<PHLWINDOW>                  bell;
             } window;
 
             struct {
@@ -98,11 +59,6 @@ namespace Event {
                 Event<PHLLS> closed;
                 Event<PHLLS> updateRules;
             } layer;
-
-            struct {
-                Event<PHLVIEW>           create;
-                Event<SViewDestroyEvent> destroy;
-            } view;
 
             struct {
                 struct {
@@ -157,13 +113,11 @@ namespace Event {
             } gesture;
 
             struct {
-                Event<PHLMONITOR> newMon;     // new monitor
-                Event<PHLMONITOR> destroyMon; // monitor hard removed
-
+                Event<PHLMONITOR> newMon;
                 Event<PHLMONITOR> preAdded;
-                Event<PHLMONITOR> added; // connected (enabled)
+                Event<PHLMONITOR> added;
                 Event<PHLMONITOR> preRemoved;
-                Event<PHLMONITOR> removed; // disconnected (disabled)
+                Event<PHLMONITOR> removed;
                 Event<PHLMONITOR> preCommit;
                 Event<PHLMONITOR> focused;
 
@@ -173,29 +127,20 @@ namespace Event {
             struct {
                 Event<PHLWORKSPACE, PHLMONITOR> moveToMonitor;
                 Event<PHLWORKSPACE>             active;
-                Event<PHLWORKSPACE, PHLMONITOR> specialActive;
                 Event<PHLWORKSPACEREF>          created;
                 Event<PHLWORKSPACEREF>          removed;
             } workspace;
 
             struct {
-                Event<>           preReload;
-                Event<>           reloaded;
-                Event<const bool> props_refreshed;
+                Event<> preReload;
+                Event<> reloaded;
             } config;
 
             struct {
                 Event<const std::string&> submap;
             } keybinds;
 
-            Event<SP<CCustomEvent>>                           pluginEventAdded;
-            Event<std::string>                                pluginEventRemoved;
-            std::unordered_map<std::string, SP<CCustomEvent>> plugin;
-
         } m_events;
-
-        std::expected<void, std::string> addPluginEvent(SP<CCustomEvent> event);
-        std::expected<void, std::string> removePluginEvent(const std::string& name);
     };
 
     UP<CEventBus>& bus();

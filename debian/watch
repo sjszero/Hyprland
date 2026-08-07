@@ -1,0 +1,12 @@
+Version: 5
+
+Template: Github
+Project: hyprland
+Owner: hyprwm
+Repack: yes
+Repacksuffix: +ds
+Dversion-Mangle: auto
+# workaround for https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1115546
+Source: https://api.github.com/repos/hyprwm/hyprland/releases
+Matching-Pattern: https://github.com/hyprwm/Hyprland/releases/download/v[0-9.]+/source-@ANY_VERSION@.tar.gz
+Filename-Mangle: auto

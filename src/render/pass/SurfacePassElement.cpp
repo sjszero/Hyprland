@@ -42,9 +42,8 @@ CBox CSurfacePassElement::getTexBox() {
             if (!INTERACTIVERESIZEINPROGRESS) {
                 windowBox.translate(CORRECT);
 
-                const auto REALSIZE = PWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                windowBox.width     = SIZE.x * (REALSIZE.x / REPORTED.x);
-                windowBox.height    = SIZE.y * (REALSIZE.y / REPORTED.y);
+                windowBox.width  = SIZE.x * (PWINDOW->m_realSize->value().x / REPORTED.x);
+                windowBox.height = SIZE.y * (PWINDOW->m_realSize->value().y / REPORTED.y);
             } else {
                 windowBox.width  = SIZE.x;
                 windowBox.height = SIZE.y;
@@ -56,13 +55,12 @@ CBox CSurfacePassElement::getTexBox() {
 
         windowBox = {sc<int>(outputX) + m_data.pos.x + m_data.localPos.x, sc<int>(outputY) + m_data.pos.y + m_data.localPos.y, std::max(sc<float>(SURFSIZE.x), 2.F),
                      std::max(sc<float>(SURFSIZE.y), 2.F)};
-        if (m_data.pWindow && m_data.pWindow->sizeAnimation()->isBeingAnimated() && m_data.surface && !m_data.mainSurface && m_data.squishOversized /* subsurface */) {
+        if (m_data.pWindow && m_data.pWindow->m_realSize->isBeingAnimated() && m_data.surface && !m_data.mainSurface && m_data.squishOversized /* subsurface */) {
             // adjust subsurfaces to the window
             const auto REPORTED = m_data.pWindow->getReportedSize();
             if (REPORTED.x != 0 && REPORTED.y != 0) {
-                const auto REALSIZE = m_data.pWindow->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                windowBox.width     = (windowBox.width / REPORTED.x) * REALSIZE.x;
-                windowBox.height    = (windowBox.height / REPORTED.y) * REALSIZE.y;
+                windowBox.width  = (windowBox.width / REPORTED.x) * m_data.pWindow->m_realSize->value().x;
+                windowBox.height = (windowBox.height / REPORTED.y) * m_data.pWindow->m_realSize->value().y;
             }
         }
     }
@@ -94,7 +92,7 @@ bool CSurfacePassElement::needsLiveBlur() {
 
     const bool NEWOPTIM = g_pHyprRenderer->shouldUseNewBlurOptimizations(m_data.pLS, m_data.pWindow);
 
-    return BLUR && (m_data.blockBlurOptimization || !NEWOPTIM);
+    return BLUR && !NEWOPTIM;
 }
 
 bool CSurfacePassElement::needsPrecomputeBlur() {
@@ -111,7 +109,7 @@ bool CSurfacePassElement::needsPrecomputeBlur() {
 
     const bool NEWOPTIM = g_pHyprRenderer->shouldUseNewBlurOptimizations(m_data.pLS, m_data.pWindow);
 
-    return BLUR && NEWOPTIM && !m_data.blockBlurOptimization;
+    return BLUR && NEWOPTIM;
 }
 
 std::optional<CBox> CSurfacePassElement::boundingBox() {

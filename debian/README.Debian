@@ -1,0 +1,7 @@
+Hyprland for Debian
+-------------------
+
+Hyprland plugins are .so files that must match the exact Hyprland version in use.
+When installed from Debian packages, load them with:
+  hyprctl plugin load /absolute/path/plugin.so (or via your config).
+Note: hyprpm is only needed for plugins installed outside the packaging system.

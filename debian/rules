@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/architecture.mk
+
+# export DH_VERBOSE = 1
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+all
+# export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
+# export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O2
+
+EXTRA_CMAKE_ARGS = \
+	-DBUILD_TESTING=OFF \
+	-DBUILD_HYPRTESTER=OFF \
+	-DCMAKE_INSTALL_INCLUDEDIR=include/${DEB_HOST_MULTIARCH}
+
+include /usr/share/dpkg/buildflags.mk
+
+builddir = build
+
+
+%:
+	dh $@ --buildsystem=cmake --builddirectory=$(builddir)
+
+override_dh_auto_configure:
+	dh_auto_configure -- $(EXTRA_CMAKE_ARGS)
+
+override_dh_dwz:
+	dh_dwz -XHyprland # Skipping dwz, compression not beneficial on Hyprland
+
+override_dh_gencontrol:
+	. debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/hyprland/debian-abi-helper && \
+	dh_gencontrol -- \
+		"-Vhyprland:Provides=$${HYPRLAND_ABI}, $${HYPRLAND_API}"

@@ -20,7 +20,8 @@ void CMoveTrackpadGesture::update(const ITrackpadGesture::STrackpadGestureUpdate
 
     if (m_window->m_isFloating) {
         g_layoutManager->moveTarget(DELTA, m_window->layoutTarget());
-        m_window->finishAnimation();
+        m_window->m_realSize->warp();
+        m_window->m_realPosition->warp();
         return;
     }
 
@@ -45,7 +46,7 @@ void CMoveTrackpadGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
 
     // tiled: attempt to move window in the given direction
 
-    const auto WINDOWPOS = m_window->position(Desktop::View::IGeometric::GEOMETRIC_GOAL) + m_window->m_floatingOffset;
+    const auto WINDOWPOS = m_window->m_realPosition->goal() + m_window->m_floatingOffset;
 
     m_window->m_floatingOffset = {};
 
@@ -57,10 +58,10 @@ void CMoveTrackpadGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
         g_layoutManager->moveInDirection(m_window->layoutTarget(), m_lastDelta.y > 0 ? "b" : "t");
     }
 
-    const auto GOAL = m_window->position(Desktop::View::IGeometric::GEOMETRIC_GOAL);
+    const auto GOAL = m_window->m_realPosition->goal();
 
-    m_window->positionAnimation()->setValueAndWarp(WINDOWPOS);
-    m_window->move(GOAL);
+    m_window->m_realPosition->setValueAndWarp(WINDOWPOS);
+    *m_window->m_realPosition = GOAL;
 
     m_window.reset();
 }

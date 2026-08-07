@@ -15,6 +15,7 @@
 AQUAMARINE_FORWARD(CDRMBackend);
 AQUAMARINE_FORWARD(CDRMLease);
 class CDRMLeaseDeviceResource;
+class CMonitor;
 class CDRMLeaseProtocol;
 class CDRMLeaseConnectorResource;
 class CDRMLeaseRequestResource;

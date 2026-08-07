@@ -13,23 +13,6 @@ enum eDiscardMode : uint8_t {
     DISCARD_ALPHA  = 1 << 1
 };
 
-enum eWrapMode : uint8_t {
-    WRAP_CLAMP_TO_EDGE,
-    WRAP_REPEAT,
-};
-
-struct SMotionBlurData {
-    bool     enabled         = false;
-    CBox     previous        = {};
-    CBox     current         = {};
-    CBox     source          = {};
-    Vector2D sourceTexOrigin = {};
-    Vector2D sourceTexSize;
-    int      samples = 1;
-
-    CBox     extents() const;
-};
-
 class CTexPassElement : public IPassElement {
   public:
     struct SRenderData {
@@ -39,12 +22,12 @@ class CTexPassElement : public IPassElement {
         float                  blurA    = 1.F;
         float                  overallA = 1.F;
         CRegion                damage;
-        bool                   useProvidedDamage = false;
-        int                    round             = 0;
-        float                  roundingPower     = 2.0f;
+        int                    round               = 0;
+        float                  roundingPower       = 2.0f;
+        bool                   flipEndFrame        = false;
+        bool                   useMirrorProjection = false;
         CBox                   clipBox;
-        bool                   blur           = false;
-        bool                   forceBlurBlend = false;
+        bool                   blur = false;
         std::optional<float>   ignoreAlpha;
         std::optional<bool>    blockBlurOptimization;
         bool                   cmBackToSRGB = false;
@@ -53,18 +36,13 @@ class CTexPassElement : public IPassElement {
         bool                   allowCustomUV = false;
         SP<CWLSurfaceResource> surface       = nullptr;
 
-        uint8_t                wrapX = WRAP_CLAMP_TO_EDGE;
-        uint8_t                wrapY = WRAP_CLAMP_TO_EDGE;
-
-        uint8_t                discardMode    = DISCARD_OPAQUE;
+        uint32_t               discardMode    = DISCARD_OPAQUE;
         float                  discardOpacity = 0.f;
 
         CRegion                clipRegion;
         PHLLSREF               currentLS;
 
         SP<Render::ITexture>   blurredBG;
-        SP<Render::ITexture>   blurAlphaMatte;
-        SMotionBlurData        motionBlur;
     };
 
     CTexPassElement(const SRenderData& data);

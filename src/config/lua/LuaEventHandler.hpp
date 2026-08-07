@@ -1,6 +1,5 @@
 #pragma once
 
-#include <expected>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -12,7 +11,6 @@
 #include "../../helpers/memory/Memory.hpp"
 #include "../../helpers/signal/Signal.hpp"
 #include "../../desktop/DesktopTypes.hpp"
-#include "event/EventBus.hpp"
 
 extern "C" {
 #include <lua.h>
@@ -33,15 +31,12 @@ namespace Config::Lua {
 
         // Store a Lua function (as a registry ref) to be called when `name` fires.
         // Returns a subscription handle, or std::nullopt if the event name is unknown.
-        std::optional<uint64_t>                registerEvent(const std::string& name, int luaRef);
-        bool                                   unregisterEvent(uint64_t handle);
+        std::optional<uint64_t>                       registerEvent(const std::string& name, int luaRef);
+        bool                                          unregisterEvent(uint64_t handle);
 
-        void                                   clearEvents();
+        void                                          clearEvents();
 
-        std::expected<void, std::string>       addCustomEvent(SP<Event::CEventBus::CCustomEvent> event);
-        std::expected<void, std::string>       removeCustomEvent(const std::string& name);
-
-        static std::unordered_set<std::string> knownEvents();
+        static const std::unordered_set<std::string>& knownEvents();
 
       private:
         struct SSubscription {
@@ -57,11 +52,10 @@ namespace Config::Lua {
         uint64_t                                               m_nextHandle    = 1;
         size_t                                                 m_dispatchDepth = 0;
         std::vector<CHyprSignalListener>                       m_listeners;
-        std::unordered_map<std::string, CHyprSignalListener>   m_pluginListeners;
 
         static constexpr size_t                                MAX_DISPATCH_DEPTH = 32;
 
-        void                                                   dispatch(const std::string& name, int nargs, const std::function<void(lua_State*)>& pushArgs);
+        void                                                   dispatch(const std::string& name, int nargs, const std::function<void()>& pushArgs);
     };
 
 }

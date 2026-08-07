@@ -1,5 +1,5 @@
 #include "ScreenshareManager.hpp"
-#include "../../pointer/PointerManager.hpp"
+#include "../PointerManager.hpp"
 #include "../input/InputManager.hpp"
 #include "../permissions/DynamicPermissionManager.hpp"
 #include "../../protocols/ColorManagement.hpp"
@@ -7,14 +7,12 @@
 #include "../../Compositor.hpp"
 #include "../../render/Renderer.hpp"
 #include "../../render/OpenGL.hpp"
-#include "../../output/Monitor.hpp"
-#include "../../state/MonitorState.hpp"
+#include "../../helpers/Monitor.hpp"
 #include "../../desktop/view/Window.hpp"
 #include "../../desktop/state/FocusState.hpp"
 #include "../../render/pass/ClearPassElement.hpp"
 #include "../../render/pass/RectPassElement.hpp"
 #include "helpers/cm/ColorManagement.hpp"
-#include "../../managers/fullscreen/FullscreenController.hpp"
 #include <hyprutils/math/Region.hpp>
 #include <hyprgraphics/egl/Egl.hpp>
 
@@ -73,7 +71,7 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
     if UNLIKELY (done())
         return ERROR_STOPPED;
 
-    if UNLIKELY (!m_session->monitor() || !State::monitorState()->contains(m_session->monitor())) {
+    if UNLIKELY (!m_session->monitor() || !g_pCompositor->monitorExists(m_session->monitor())) {
         LOGM(Log::ERR, "Client requested sharing of a monitor that is gone");
         m_failed = true;
         return ERROR_STOPPED;
@@ -88,11 +86,6 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
     if UNLIKELY (!buffer || !buffer->m_resource || !buffer->m_resource->good()) {
         LOGM(Log::ERR, "Client requested sharing to an invalid buffer");
         return ERROR_NO_BUFFER;
-    }
-
-    if UNLIKELY (m_bufferSize != m_session->bufferSize()) {
-        LOGM(Log::ERR, "Client requested sharing with stale buffer constraints");
-        return ERROR_BUFFER_SIZE;
     }
 
     if UNLIKELY (buffer->size != m_bufferSize) {
@@ -127,10 +120,8 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
 
     // schedule a frame so that when a screenshare starts it isn't black until the output is updated
     if (m_isFirst) {
-        const auto PMONITOR = m_session->monitor();
-        if (PMONITOR)
-            PMONITOR->scheduleFrame(Aquamarine::IOutput::AQ_SCHEDULE_NEEDS_FRAME);
-        g_pHyprRenderer->damageMonitor(PMONITOR);
+        g_pCompositor->scheduleFrameForMonitor(m_session->monitor(), Aquamarine::IOutput::AQ_SCHEDULE_NEEDS_FRAME);
+        g_pHyprRenderer->damageMonitor(m_session->monitor());
     }
 
     // TODO: add a damage ring for output damage since last shared frame
@@ -148,7 +139,7 @@ eScreenshareError CScreenshareFrame::share(SP<IHLBuffer> buffer, const CRegion& 
 }
 
 void CScreenshareFrame::copy() {
-    if (done() || m_copyInFlight)
+    if (done())
         return;
 
     // tell client to send presented timestamp
@@ -200,15 +191,14 @@ void CScreenshareFrame::renderMonitor() {
         Log::logger->log(Log::TRACE, "CM: screenshot renderMonitor {} -> {}", TEXTURE->m_imageDescription->value(),
                          g_pHyprRenderer->m_renderData.currentFB->imageDescription()->value());
 
-    const bool IS_CM_AWARE               = PROTO::colorManagement && PROTO::colorManagement->isClientCMAware(m_session->m_client);
-    g_pHyprRenderer->m_renderData.fbSize = m_bufferSize;
-    g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
+    const bool IS_CM_AWARE                        = PROTO::colorManagement && PROTO::colorManagement->isClientCMAware(m_session->m_client);
     g_pHyprRenderer->m_renderData.transformDamage = false;
     g_pHyprRenderer->m_renderData.noSimplify      = true;
-    g_pHyprRenderer->setViewport(0, 0, m_bufferSize.x, m_bufferSize.y);
 
     // render monitor texture
-    CBox       monbox = CBox{{}, PMONITOR->m_transformedSize}.translate(-m_session->m_captureBox.pos());
+    CBox       monbox = CBox{{}, PMONITOR->m_pixelSize}
+                            .transform(Math::wlTransformToHyprutils(Math::invertTransform(PMONITOR->m_transform)), PMONITOR->m_pixelSize.x, PMONITOR->m_pixelSize.y)
+                            .translate(-m_session->m_captureBox.pos()); // vvvv kinda ass-backwards but that's how I designed the renderer... sigh.
 
     const auto OLD                                    = g_pHyprRenderer->m_renderData.renderModif.enabled;
     g_pHyprRenderer->m_renderData.renderModif.enabled = false;
@@ -217,9 +207,10 @@ void CScreenshareFrame::renderMonitor() {
         CTexPassElement::SRenderData{
             .tex          = TEXTURE,
             .box          = monbox,
+            .flipEndFrame = true,
             .cmBackToSRGB = !IS_CM_AWARE,
         },
-        {0, 0, m_bufferSize.x, m_bufferSize.y});
+        {0, 0, PMONITOR->m_pixelSize.x, PMONITOR->m_pixelSize.y});
     g_pHyprRenderer->m_renderData.renderModif.enabled = OLD;
 
     // render black boxes for noscreenshare
@@ -242,15 +233,15 @@ void CScreenshareFrame::renderMonitor() {
         };
     };
 
-    for (auto const& l : Desktop::layerState()->layers()) {
+    for (auto const& l : g_pCompositor->m_layers) {
         if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
             continue;
 
         if UNLIKELY (!l->visible())
             continue;
 
-        const auto REALPOS  = l->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-        const auto REALSIZE = l->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALPOS  = l->m_realPosition->value();
+        const auto REALSIZE = l->m_realSize->value();
 
         const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)}
                                           .translate(-PMONITOR->m_position)
@@ -265,7 +256,7 @@ void CScreenshareFrame::renderMonitor() {
             l->m_popupHead->breadthfirst(hidePopups(popupBaseOffset), nullptr);
     }
 
-    for (auto const& w : Desktop::windowState()->windows()) {
+    for (auto const& w : g_pCompositor->m_windows) {
         if (!w->m_ruleApplicator->noScreenShare().valueOrDefault())
             continue;
 
@@ -277,19 +268,18 @@ void CScreenshareFrame::renderMonitor() {
 
         const auto PWORKSPACE = w->m_workspace;
 
-        if UNLIKELY (!PWORKSPACE && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
+        if UNLIKELY (!PWORKSPACE && !w->m_fadingOut && w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) != 0.f)
             continue;
 
         const auto renderOffset     = PWORKSPACE && !w->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D{};
-        const auto REALSIZE         = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-        const auto REALPOS          = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + renderOffset;
-        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(REALSIZE.x, 5.0), std::max(REALSIZE.y, 5.0)}
+        const auto REALPOS          = w->m_realPosition->value() + renderOffset;
+        const auto noScreenShareBox = CBox{REALPOS.x, REALPOS.y, std::max(w->m_realSize->value().x, 5.0), std::max(w->m_realSize->value().y, 5.0)}
                                           .translate(-PMONITOR->m_position)
                                           .scale(PMONITOR->m_scale)
                                           .translate(-m_session->m_captureBox.pos());
 
         // seems like rounding doesn't play well with how we manipulate the box position to render regions causing the window to leak through
-        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || Fullscreen::controller()->isFullscreen(w, Fullscreen::FSMODE_FULLSCREEN);
+        const auto dontRound     = m_session->m_captureBox.pos() != Vector2D() || w->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
         const auto rounding      = dontRound ? 0 : w->rounding() * PMONITOR->m_scale;
         const auto roundingPower = dontRound ? 2.0f : w->roundingPower();
 
@@ -312,9 +302,9 @@ void CScreenshareFrame::renderMonitor() {
     }
 
     if (m_overlayCursor) {
-        CRegion  fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
+        CRegion  fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
         Vector2D cursorPos  = g_pInputManager->getMouseCoordsInternal() - PMONITOR->m_position - m_session->m_captureBox.pos() / PMONITOR->m_scale;
-        Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR, Time::steadyNow(), fakeDamage, cursorPos, true);
+        g_pPointerManager->renderSoftwareCursorsFor(PMONITOR, Time::steadyNow(), fakeDamage, cursorPos, true);
     }
 }
 
@@ -357,14 +347,13 @@ void CScreenshareFrame::renderWindow() {
         return;
 
     CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
-    Pointer::mgr()->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage,
-                                             g_pInputManager->getMouseCoordsInternal() - PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), true, true);
+    g_pPointerManager->renderSoftwareCursorsFor(PMONITOR->m_self.lock(), NOW, fakeDamage, g_pInputManager->getMouseCoordsInternal() - PWINDOW->m_realPosition->value(), true);
 }
 
 void CScreenshareFrame::render() {
     const auto PERM = g_pDynamicPermissionManager->clientPermissionMode(m_session->m_client, PERMISSION_TYPE_SCREENCOPY);
 
-    CRegion    frameRegion = {0, 0, m_bufferSize.x, m_bufferSize.y};
+    CRegion    frameRegion = {0, 0, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.x, g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize.y};
 
     g_pHyprRenderer->draw(CClearPassElement::SClearData{{0, 0, 0, 0}}, frameRegion);
 
@@ -409,15 +398,8 @@ bool CScreenshareFrame::copyDmabuf() {
 
     g_pHyprRenderer->m_renderData.blockScreenShader = true;
 
-    m_copyInFlight = true;
-
     g_pHyprRenderer->endRender([self = m_self]() {
-        if (!self || self.expired())
-            return;
-
-        self->m_copyInFlight = false;
-
-        if (self->m_copied)
+        if (!self || self.expired() || self->m_copied)
             return;
 
         LOGM(Log::TRACE, "Copied frame via dma");
@@ -457,23 +439,13 @@ bool CScreenshareFrame::copyShm() {
 
     g_pHyprRenderer->endRender();
 
-    bool readSucceeded = true;
     m_damage.forEachRect([&](const auto& rect) {
-        if (!readSucceeded)
-            return;
-
         int width  = rect.x2 - rect.x1;
         int height = rect.y2 - rect.y1;
-        if (!outFB->readPixels(m_buffer, rect.x1, rect.y1, width, height))
-            readSucceeded = false;
+        outFB->readPixels(m_buffer, rect.x1, rect.y1, width, height);
     });
 
     g_pHyprRenderer->m_renderData.pMonitor.reset();
-
-    if (!readSucceeded) {
-        LOGM(Log::ERR, "Can't copy: failed to read pixels to shm");
-        return false;
-    }
 
     if (!m_copied) {
         LOGM(Log::TRACE, "Copied frame via shm");
@@ -490,7 +462,7 @@ void CScreenshareFrame::storeTempFB() {
     m_session->m_tempFB->alloc(m_bufferSize.x, m_bufferSize.y);
     m_session->m_tempFB->setImageDescription(NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION);
 
-    CRegion fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
+    CRegion fakeDamage = {0, 0, INT16_MAX, INT16_MAX};
 
     if (!g_pHyprRenderer->beginFullFakeRender(m_session->monitor(), fakeDamage, m_session->m_tempFB)) {
         LOGM(Log::ERR, "Can't copy: failed to begin rendering to temp fb");
@@ -513,7 +485,12 @@ Vector2D CScreenshareFrame::bufferSize() const {
 }
 
 wl_output_transform CScreenshareFrame::transform() const {
-    return WL_OUTPUT_TRANSFORM_NORMAL;
+    switch (m_session->m_type) {
+        case SHARE_REGION:
+        case SHARE_MONITOR: return m_session->monitor()->m_transform;
+        default:
+        case SHARE_WINDOW: return WL_OUTPUT_TRANSFORM_NORMAL;
+    }
 }
 
 const CRegion& CScreenshareFrame::damage() const {

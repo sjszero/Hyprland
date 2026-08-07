@@ -3,7 +3,6 @@
 #include "../helpers/signal/Signal.hpp"
 #include "../helpers/memory/Memory.hpp"
 #include "../helpers/math/Math.hpp"
-#include <optional>
 #include <vector>
 
 class CWLSurfaceResource;
@@ -122,8 +121,6 @@ class CXWaylandSurface {
     } m_listeners;
 
     std::unordered_map<xcb_atom_t, bool> m_supportedProps;
-    std::optional<std::string>           m_wmName;
-    std::optional<std::string>           m_netWmName;
 
     friend class CXWM;
 };

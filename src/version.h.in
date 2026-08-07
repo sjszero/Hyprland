@@ -1,11 +1,11 @@
 #pragma once
-#define GIT_COMMIT_HASH    "@GIT_COMMIT_HASH@"
-#define GIT_BRANCH         "@GIT_BRANCH@"
-#define GIT_COMMIT_MESSAGE "@GIT_COMMIT_MESSAGE@"
-#define GIT_COMMIT_DATE    "@GIT_COMMIT_DATE@"
-#define GIT_DIRTY          "@GIT_DIRTY@"
-#define GIT_TAG            "@GIT_TAG@"
-#define GIT_COMMITS        "@GIT_COMMITS@"
+#define GIT_COMMIT_HASH    "a0136d8c04687bb36eb8a28eb9d1ff92aea99704"
+#define GIT_BRANCH         "v0.55.4"
+#define GIT_COMMIT_MESSAGE "[gha] Nix: update inputs"
+#define GIT_COMMIT_DATE    "Thu Jun 11 17:10:04 2026"
+#define GIT_DIRTY          "clean"
+#define GIT_TAG            "v0.55.4"
+#define GIT_COMMITS        "7378"
 
 #define AQUAMARINE_VERSION "@AQUAMARINE_VERSION@"
 // clang-format off

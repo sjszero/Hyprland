@@ -1,0 +1,57 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Thu, 7 Aug 2026 13:00:00 +0800
+Subject: config: Use normal Hyprland config and log paths in Anland sessions
+
+Split from the Anland Hyprland integration series for reviewable, independently revertible changes.
+
+---
+diff --git a/src/config/supplementary/jeremy/Jeremy.cpp b/src/config/supplementary/jeremy/Jeremy.cpp
+index ee39e2d..c5e3ec9 100644
+--- a/src/config/supplementary/jeremy/Jeremy.cpp
++++ b/src/config/supplementary/jeremy/Jeremy.cpp
+@@ -32,15 +32,15 @@ std::expected<SConfigStateReply, std::string> Jeremy::getMainConfigPath() {
+         if (const auto CFG_ENV = getenv("HYPRLAND_CONFIG"); CFG_ENV)
+             return SConfigStateReply{.path = CFG_ENV, .type = CONFIG_TYPE_EXPLICIT};
+ 
+-        const auto LUA_PATHS  = Hyprutils::Path::findConfig(ISDEBUG ? "hyprlandd" : "hyprland", "lua");
+-        const auto CONF_PATHS = Hyprutils::Path::findConfig(ISDEBUG ? "hyprlandd" : "hyprland", "conf");
++        const auto LUA_PATHS  = Hyprutils::Path::findConfig("hyprland", "lua");
++        const auto CONF_PATHS = Hyprutils::Path::findConfig("hyprland", "conf");
+ 
+         if (LUA_PATHS.first.has_value())
+             return SConfigStateReply{.path = LUA_PATHS.first.value(), .type = CONFIG_TYPE_REGULAR};
+         else if (CONF_PATHS.first.has_value())
+             return SConfigStateReply{.path = CONF_PATHS.first.value(), .type = CONFIG_TYPE_REGULAR};
+         else if (LUA_PATHS.second.has_value()) {
+-            auto CONFIGPATH = Hyprutils::Path::fullConfigPath(LUA_PATHS.second.value(), ISDEBUG ? "hyprlandd" : "hyprland", "lua");
++            auto CONFIGPATH = Hyprutils::Path::fullConfigPath(LUA_PATHS.second.value(), "hyprland", "lua");
+             return SConfigStateReply{.path = CONFIGPATH, .type = CONFIG_TYPE_REGULAR};
+         } else
+             return std::unexpected("Neither HOME nor XDG_CONFIG_HOME are set in the environment. Could not find config in XDG_CONFIG_DIRS or /etc/xdg.");
+@@ -51,4 +51,4 @@ std::expected<SConfigStateReply, std::string> Jeremy::getMainConfigPath() {
+         CONFIG_PATH = getCfgPath();
+ 
+     return CONFIG_PATH;
+-}
++}
+\ No newline at end of file
+diff --git a/src/debug/log/Logger.cpp b/src/debug/log/Logger.cpp
+index 52ba475..4b654f1 100644
+--- a/src/debug/log/Logger.cpp
++++ b/src/debug/log/Logger.cpp
+@@ -30,7 +30,7 @@ void CLogger::log(Hyprutils::CLI::eLogLevel level, const std::string_view& str)
+ 
+ void CLogger::initIS(const std::string_view& IS) {
+     // NOLINTNEXTLINE
+-    m_logger.setOutputFile(std::string{IS} + (ISDEBUG ? "/hyprlandd.log" : "/hyprland.log"));
++    m_logger.setOutputFile(std::string{IS} + "/hyprland.log");
+     m_logger.setEnableRolling(true);
+     m_logger.setEnableColor(false);
+     m_logger.setEnableStdout(true);
+@@ -60,4 +60,4 @@ const std::string& CLogger::rolling() {
+ 
+ Hyprutils::CLI::CLogger& CLogger::hu() {
+     return m_logger;
+-}
++}
+\ No newline at end of file

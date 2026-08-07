@@ -6,13 +6,8 @@
 
 #include "../../../desktop/DesktopTypes.hpp"
 #include "../../../desktop/Workspace.hpp"
-#include "../../../input/Keys.hpp"
 #include "../../../helpers/math/Direction.hpp"
 #include "../ConfigErrors.hpp"
-
-namespace Fullscreen {
-    enum eFullscreenMode : int8_t;
-}
 
 namespace Config::Actions {
     struct SActionResult {
@@ -42,9 +37,8 @@ namespace Config::Actions {
     ActionResult floatWindow(eTogglableAction action, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult pseudoWindow(eTogglableAction action, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult pinWindow(eTogglableAction action, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
-    ActionResult fullscreenWindow(Fullscreen::eFullscreenMode mode, bool layoutAware, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
-    ActionResult fullscreenWindow(Fullscreen::eFullscreenMode internalMode, Fullscreen::eFullscreenMode clientMode, bool layoutAware,
-                                  std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult fullscreenWindow(eFullscreenMode mode, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult fullscreenWindow(eFullscreenMode internalMode, eFullscreenMode clientMode, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveToWorkspace(PHLWORKSPACE ws, bool silent, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult moveFocus(Math::eDirection dir);
     ActionResult focus(PHLWINDOW window);
@@ -61,8 +55,8 @@ namespace Config::Actions {
     ActionResult tag(const std::string& tag, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult clearTags(std::optional<PHLWINDOW> w = std::nullopt);
     ActionResult pass(std::optional<PHLWINDOW> window = std::nullopt /* Active */);
-    ActionResult pass(Input::ModifierMask modMask, uint32_t key, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
-    ActionResult sendKeyState(Input::ModifierMask modMask, uint32_t key, uint32_t state, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult pass(uint32_t modMask, uint32_t key, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
+    ActionResult sendKeyState(uint32_t modMask, uint32_t key, uint32_t state, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult swapNext(const bool next, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult alterZOrder(const std::string& mode, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
     ActionResult setProp(const std::string& prop, const std::string& val, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
@@ -74,7 +68,6 @@ namespace Config::Actions {
     ActionResult changeWorkspace(PHLWORKSPACE ws);
     ActionResult changeWorkspace(const std::string& ws);
     ActionResult renameWorkspace(PHLWORKSPACE ws, const std::string& s);
-    ActionResult changeWorkspaceID(PHLWORKSPACE ws, int64_t id);
     ActionResult moveToMonitor(PHLWORKSPACE ws, PHLMONITOR mon);
     ActionResult changeWorkspaceOnCurrentMonitor(PHLWORKSPACE ws);
     ActionResult toggleSpecial(PHLWORKSPACE special);
@@ -105,20 +98,16 @@ namespace Config::Actions {
     ActionResult denyWindowFromGroup(eTogglableAction action);
     ActionResult moveIntoOrCreateGroup(Math::eDirection dir, std::optional<PHLWINDOW> window = std::nullopt /* Active */);
 
-    ActionResult releaseInputCapture();
-
     class CActionState {
       public:
         CActionState()  = default;
         ~CActionState() = default;
 
-        int         m_passPressed         = -1; // -1 = dynamic (press+release), 0 = released, 1 = pressed
-        int         m_bindInvocationDepth = 0;
-        bool        m_requestBindRelease  = false;
-        uint32_t    m_lastCode            = 0;  // last keycode (keyboard event), 0 if last was mouse
-        uint32_t    m_lastMouseCode       = 0;  // last mouse button code, 0 if last was keyboard
-        uint32_t    m_timeLastMs          = 0;  // timestamp of last key/mouse event
-        std::string m_currentSubmap       = ""; // current keybind submap name
+        int         m_passPressed   = -1; // -1 = dynamic (press+release), 0 = released, 1 = pressed
+        uint32_t    m_lastCode      = 0;  // last keycode (keyboard event), 0 if last was mouse
+        uint32_t    m_lastMouseCode = 0;  // last mouse button code, 0 if last was keyboard
+        uint32_t    m_timeLastMs    = 0;  // timestamp of last key/mouse event
+        std::string m_currentSubmap = ""; // current keybind submap name
     };
 
     UP<CActionState>& state();

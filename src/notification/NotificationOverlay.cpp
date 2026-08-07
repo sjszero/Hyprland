@@ -9,8 +9,8 @@
 #include "../render/pass/RectPassElement.hpp"
 #include "../render/pass/TexPassElement.hpp"
 #include "../event/EventBus.hpp"
-#include "../state/MonitorState.hpp"
-#include "../animation/AnimationManager.hpp"
+
+#include "../managers/animation/AnimationManager.hpp"
 #include "../render/Renderer.hpp"
 
 using namespace Notification;
@@ -86,7 +86,7 @@ eIconBackend CNotificationOverlay::iconBackendForFont(const std::string& fontFam
 
 void CNotificationOverlay::ensureNotificationCache(CNotification& notif, PHLMONITOR pMonitor, const std::string& fontFamily) {
     const auto iconBackend = iconBackendForFont(fontFamily);
-    const auto fontSizePx  = std::clamp(sc<int>(notif.fontSize() * ((pMonitor->m_transformedSize.x * pMonitor->m_scale) / 1920.F)), 8, 40);
+    const auto fontSizePx  = std::clamp(sc<int>(notif.fontSize() * ((pMonitor->m_pixelSize.x * pMonitor->m_scale) / 1920.F)), 8, 40);
 
     const bool cacheValid = notif.m_cache.monitor == pMonitor && notif.m_cache.fontFamily == fontFamily && notif.m_cache.fontSizePx == fontSizePx &&
         notif.m_cache.iconBackend == iconBackend && notif.m_cache.textTex && (notif.icon() == ICON_NONE || notif.m_cache.iconTex);
@@ -115,8 +115,8 @@ void CNotificationOverlay::ensureNotificationCache(CNotification& notif, PHLMONI
 }
 
 void CNotificationOverlay::scheduleFrames() const {
-    for (auto const& m : State::monitorState()->monitors()) {
-        m->scheduleFrame();
+    for (auto const& m : g_pCompositor->m_monitors) {
+        g_pCompositor->scheduleFrameForMonitor(m);
     }
 }
 
@@ -208,7 +208,7 @@ CBox CNotificationOverlay::drawNotifications(PHLMONITOR pMonitor) {
     const auto  MONSIZE = pMonitor->m_transformedSize;
 
     static auto fontFamily = CConfigValue<std::string>("misc:font_family");
-    const auto  PBEZIER    = Animation::mgr()->getBezier("default");
+    const auto  PBEZIER    = g_pAnimationManager->getBezier("default");
 
     for (auto const& notif : m_notifications) {
         ensureNotificationCache(*notif, pMonitor, *fontFamily);
@@ -308,7 +308,7 @@ void CNotificationOverlay::draw(PHLMONITOR pMonitor) {
     g_pHyprRenderer->damageBox(damage);
     g_pHyprRenderer->damageBox(m_lastDamage);
 
-    pMonitor->scheduleFrame();
+    g_pCompositor->scheduleFrameForMonitor(pMonitor);
 
     m_lastDamage = damage;
 }

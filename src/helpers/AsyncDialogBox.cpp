@@ -95,7 +95,7 @@ void CAsyncDialogBox::onWrite(int fd, uint32_t mask) {
 SP<CPromise<std::string>> CAsyncDialogBox::open() {
     std::string buttonsString = "";
     for (auto& b : m_buttons) {
-        buttonsString += std::format("{};", b);
+        buttonsString += b + ";";
     }
     if (!buttonsString.empty())
         buttonsString.pop_back();
@@ -131,7 +131,7 @@ SP<CPromise<std::string>> CAsyncDialogBox::open() {
     }
 
     m_dialogPid = proc.pid();
-    asyncDialogBoxes.emplace_back(m_dialogPid, m_selfWeakReference);
+    asyncDialogBoxes.emplace_back(std::make_pair<>(m_dialogPid, m_selfWeakReference));
 
     // close the write fd, only the dialog owns it now
     close(outPipe[1]);

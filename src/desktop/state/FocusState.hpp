@@ -45,8 +45,6 @@ namespace Desktop {
 
         void                   resetWindowFocus();
 
-        bool                   isWindowActive(PHLWINDOW w) const;
-
         SP<CWLSurfaceResource> surface();
         PHLWINDOW              window();
         PHLMONITOR             monitor();

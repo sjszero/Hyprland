@@ -1,8 +1,5 @@
 #include "CHyprInnerGlowDecoration.hpp"
 
-#include <algorithm>
-
-#include "../../config/ConfigValue.hpp"
 #include "../../Compositor.hpp"
 #include "../pass/InnerGlowPassElement.hpp"
 #include "../Renderer.hpp"
@@ -52,19 +49,23 @@ void CHyprInnerGlowDecoration::damageEntire() {
 
 void CHyprInnerGlowDecoration::updateWindow(PHLWINDOW pWindow) {
     const auto PWINDOW = m_window.lock();
-    m_lastWindowPos    = PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    m_lastWindowSize   = PWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    m_lastWindowPos    = PWINDOW->m_realPosition->value();
+    m_lastWindowSize   = PWINDOW->m_realSize->value();
 }
 
 void CHyprInnerGlowDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     CInnerGlowPassElement::SInnerGlowData data;
     data.deco = this;
     data.a    = a;
-    g_pHyprRenderer->addPassElement(makeUnique<CInnerGlowPassElement>(data));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CInnerGlowPassElement>(data));
 }
 
 void CHyprInnerGlowDecoration::render(PHLMONITOR pMonitor, float const& a) {
-    static auto PGLOW = CConfigValue<Config::INTEGER>("decoration:glow:enabled");
+
+    static auto PGLOW      = CConfigValue<Hyprlang::INT>("decoration:glow:enabled");
+    static auto PGLOWRANGE = CConfigValue<Hyprlang::INT>("decoration:glow:range");
+    static auto PGLOWPOWER = CConfigValue<Hyprlang::INT>("decoration:glow:render_power");
+
     if (!*PGLOW || !visible())
         return;
 
@@ -85,48 +86,17 @@ void CHyprInnerGlowDecoration::render(PHLMONITOR pMonitor, float const& a) {
     if (windowBox.width < 1 || windowBox.height < 1)
         return;
 
-    static auto PGLOWSIZE = CConfigValue<Config::INTEGER>("decoration:glow:range");
-    const auto  GLOWSIZE  = sc<int>(*PGLOWSIZE);
-
-    auto        grad     = PWINDOW->m_realGlowColor;
-    const bool  ANIMATED = PWINDOW->m_glowFadeAnimationProgress->isBeingAnimated();
-    if (PWINDOW->m_glowAngleAnimationProgress->enabled()) {
-        grad.m_angle += PWINDOW->m_glowAngleAnimationProgress->value() * M_PI * 2;
-        grad.m_angle = normalizeAngleRad(grad.m_angle);
-
-        if (ANIMATED)
-            PWINDOW->m_realGlowColorPrevious.m_angle = grad.m_angle;
-    }
+    const int   GLOWSIZE  = *PGLOWRANGE;
+    const float GLOWPOWER = *PGLOWPOWER;
+    const auto  GLOWCOLOR = m_window->m_realGlowColor->value();
 
     g_pHyprRenderer->m_renderData.currentWindow = m_window;
 
     g_pHyprRenderer->blend(true);
 
-    if (ANIMATED)
-        drawGlowInternal(windowBox, ROUNDING * pMonitor->m_scale, ROUNDINGPOWER, GLOWSIZE * pMonitor->m_scale, PWINDOW->m_realGlowColorPrevious, grad,
-                         PWINDOW->m_glowFadeAnimationProgress->value(), a);
-    else
-        drawGlowInternal(windowBox, ROUNDING * pMonitor->m_scale, ROUNDINGPOWER, GLOWSIZE * pMonitor->m_scale, grad, a);
+    // FIXME use g_pHyprRenderer API
+    Render::GL::g_pHyprOpenGL->renderInnerGlow(windowBox, ROUNDING * pMonitor->m_scale, ROUNDINGPOWER, GLOWSIZE * pMonitor->m_scale, GLOWCOLOR, GLOWPOWER, a);
 
-    g_pHyprRenderer->m_renderData.currentWindow.reset();
-}
-
-void CHyprInnerGlowDecoration::drawGlowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad, float a) {
-    if (box.w < 1 || box.h < 1)
-        return;
-    g_pHyprRenderer->blend(true);
-    g_pHyprRenderer->m_renderData.currentWindow = m_window;
-    g_pHyprRenderer->drawGlow(box, round, roundingPower, range, grad, a);
-    g_pHyprRenderer->m_renderData.currentWindow.reset();
-}
-
-void CHyprInnerGlowDecoration::drawGlowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
-                                                const Config::CGradientValueData& grad2, float lerp, float a) {
-    if (box.w < 1 || box.h < 1)
-        return;
-    g_pHyprRenderer->blend(true);
-    g_pHyprRenderer->m_renderData.currentWindow = m_window;
-    g_pHyprRenderer->drawGlow(box, round, roundingPower, range, grad1, grad2, lerp, a);
     g_pHyprRenderer->m_renderData.currentWindow.reset();
 }
 

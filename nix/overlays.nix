@@ -56,7 +56,7 @@ in
     in
     {
       hyprland = final.callPackage ./default.nix {
-        stdenv = final.gcc16Stdenv;
+        stdenv = final.gcc15Stdenv;
         commit = self.rev or "";
         revCount = self.sourceInfo.revCount or "";
         inherit date version;

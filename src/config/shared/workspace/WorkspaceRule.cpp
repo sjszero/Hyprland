@@ -32,8 +32,6 @@ void CWorkspaceRule::mergeLeft(const CWorkspaceRule& other) {
         m_decorate = other.m_decorate;
     if (other.m_noShadow.has_value())
         m_noShadow = other.m_noShadow;
-    if (other.m_noWobble.has_value())
-        m_noWobble = other.m_noWobble;
     if (other.m_onCreatedEmptyRunCmd.has_value())
         m_onCreatedEmptyRunCmd = other.m_onCreatedEmptyRunCmd;
     if (other.m_defaultName.has_value())
@@ -47,12 +45,4 @@ void CWorkspaceRule::mergeLeft(const CWorkspaceRule& other) {
     }
     if (other.m_animationStyle.has_value())
         m_animationStyle = other.m_animationStyle;
-}
-
-void CWorkspaceRule::setEnabled(bool enabled) {
-    m_enabled = enabled;
-}
-
-bool CWorkspaceRule::isEnabled() const {
-    return m_enabled;
 }

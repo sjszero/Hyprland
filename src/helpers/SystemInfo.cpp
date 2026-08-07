@@ -6,7 +6,6 @@
 #include "../plugins/PluginSystem.hpp"
 #include "../render/OpenGL.hpp"
 #include "../config/ConfigManager.hpp"
-#include "../state/MonitorState.hpp"
 
 #include <hyprutils/string/String.hpp>
 
@@ -20,14 +19,13 @@ using namespace Helpers::SystemInfo;
 using namespace Helpers;
 using namespace Hyprutils::String;
 using namespace Render::GL;
-using namespace IPC::Socket1;
 
 static void trimTrailingComma(std::string& str) {
     if (!str.empty() && str.back() == ',')
         str.pop_back();
 }
 
-std::string SystemInfo::getStatus(eOutputFormat fmt) {
+std::string SystemInfo::getStatus(eHyprCtlOutputFormat fmt) {
     Aquamarine::eBackendType backendType = Aquamarine::eBackendType::AQ_BACKEND_NULL;
 
     for (const auto& i : g_pCompositor->m_aqBackend->getImplementations()) {
@@ -46,7 +44,7 @@ std::string SystemInfo::getStatus(eOutputFormat fmt) {
         default: backendStr = "error"; break;
     }
 
-    if (fmt == IPC::Socket1::FORMAT_JSON) {
+    if (fmt == eHyprCtlOutputFormat::FORMAT_JSON) {
 
         return std::format(R"#(
 {{
@@ -64,12 +62,12 @@ backend: {}
                        Config::typeToString(Config::mgr()->type()), backendStr);
 }
 
-std::string SystemInfo::getVersion(eOutputFormat fmt) {
+std::string SystemInfo::getVersion(eHyprCtlOutputFormat fmt) {
 
     auto commitMsg = trim(GIT_COMMIT_MESSAGE);
     std::ranges::replace(commitMsg, '#', ' ');
 
-    if (fmt == IPC::Socket1::FORMAT_NORMAL) {
+    if (fmt == eHyprCtlOutputFormat::FORMAT_NORMAL) {
         std::string result = std::format("Hyprland {} built from branch {} at commit {} {} ({}).\n"
                                          "Date: {}\n"
                                          "Tag: {}, commits: {}\n",
@@ -146,7 +144,7 @@ std::string SystemInfo::getVersion(eOutputFormat fmt) {
 }
 
 std::string SystemInfo::getSystemInfo() {
-    std::string result = getVersion(IPC::Socket1::FORMAT_NORMAL);
+    std::string result = getVersion(eHyprCtlOutputFormat::FORMAT_NORMAL);
 
     static auto check   = [](bool y) -> std::string { return y ? "✔️" : "❌"; };
     static auto backend = [](Aquamarine::eBackendType t) -> std::string {
@@ -165,10 +163,10 @@ std::string SystemInfo::getSystemInfo() {
 
     uname(&unameInfo);
 
-    result += std::format("System name: {}\n", unameInfo.sysname);
-    result += std::format("Node name: {}\n", unameInfo.nodename);
-    result += std::format("Release: {}\n", unameInfo.release);
-    result += std::format("Version: {}\n", unameInfo.version);
+    result += "System name: " + std::string{unameInfo.sysname} + "\n";
+    result += "Node name: " + std::string{unameInfo.nodename} + "\n";
+    result += "Release: " + std::string{unameInfo.release} + "\n";
+    result += "Version: " + std::string{unameInfo.version} + "\n";
     result += "\n";
     result += getBuiltSystemLibraryNames();
     result += "\n";
@@ -199,7 +197,7 @@ std::string SystemInfo::getSystemInfo() {
 #else
     const std::string GPUINFO = execAndGet("lspci -vnn | grep -E '(VGA|Display|3D)'");
 #endif
-    result += std::format("GPU information: \n{}", GPUINFO);
+    result += "GPU information: \n" + GPUINFO;
     if (GPUINFO.contains("NVIDIA") && std::filesystem::exists("/proc/driver/nvidia/version")) {
         std::ifstream file("/proc/driver/nvidia/version");
         std::string   line;
@@ -218,7 +216,7 @@ std::string SystemInfo::getSystemInfo() {
     if (std::ifstream file("/etc/os-release"); file.is_open()) {
         std::stringstream buffer;
         buffer << file.rdbuf();
-        result += std::format("os-release: {}\n\n", buffer.str());
+        result += "os-release: " + buffer.str() + "\n\n";
     } else
         result += "os-release: error\n\n";
 
@@ -233,7 +231,6 @@ std::string SystemInfo::getSystemInfo() {
     if (g_pHyprOpenGL) {
         result += std::format("\nExplicit sync: {}", g_pHyprOpenGL->m_exts.EGL_ANDROID_native_fence_sync_ext ? "supported" : "missing");
         result += std::format("\nGL ver: {}", g_pHyprOpenGL->m_eglContextVersion == CHyprOpenGLImpl::EGL_CONTEXT_GLES_3_2 ? "3.2" : "3.0");
-        result += std::format("\nFP16: {}", g_pHyprOpenGL->fp16Supported() ? "supported" : "missing");
     }
 
     if (g_pCompositor) {
@@ -241,7 +238,7 @@ std::string SystemInfo::getSystemInfo() {
 
         result += "\n\nMonitor info:";
 
-        for (const auto& m : State::monitorState()->monitors()) {
+        for (const auto& m : g_pCompositor->m_monitors) {
             result += std::format("\n\tPanel {}: {}x{}, {} {} {} {} -> backend {}\n\t\texplicit {}\n\t\tedid:\n\t\t\thdr {}\n\t\t\tchroma {}\n\t\t\tbt2020 {}\n\t\tvrr capable "
                                   "{}\n\t\tnon-desktop {}\n\t\t",
                                   m->m_name, sc<int>(m->m_pixelSize.x), sc<int>(m->m_pixelSize.y), m->m_output->name, m->m_output->make, m->m_output->model, m->m_output->serial,
@@ -252,7 +249,7 @@ std::string SystemInfo::getSystemInfo() {
     }
 
     result += "\n\nState:\n";
-    result += getStatus(IPC::Socket1::FORMAT_NORMAL);
+    result += getStatus(FORMAT_NORMAL);
 
     result += "\n\n";
 

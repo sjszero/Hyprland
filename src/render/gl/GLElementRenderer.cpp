@@ -108,12 +108,10 @@ void CGLElementRenderer::draw(WP<CTexPassElement> element, const CRegion& damage
         {
             // blur settings for m_data.blur == true
             .blur                  = m_data.blur,
-            .forceBlurBlend        = m_data.forceBlurBlend,
             .blurA                 = m_data.blurA,
             .overallA              = m_data.overallA,
             .blockBlurOptimization = m_data.blockBlurOptimization.value_or(false),
             .blurredBG             = m_data.blurredBG,
-            .blurAlphaMatte        = m_data.blurAlphaMatte,
 
             // common settings
             .damage         = m_data.damage.empty() ? &damage : &m_data.damage,
@@ -123,8 +121,6 @@ void CGLElementRenderer::draw(WP<CTexPassElement> element, const CRegion& damage
             .roundingPower  = m_data.roundingPower,
             .discardActive  = m_data.discardActive,
             .allowCustomUV  = m_data.allowCustomUV,
-            .wrapX          = m_data.wrapX,
-            .wrapY          = m_data.wrapY,
             .cmBackToSRGB   = m_data.cmBackToSRGB,
             .discardMode    = m_data.ignoreAlpha.has_value() ? sc<uint32_t>(DISCARD_ALPHA) : m_data.discardMode,
             .discardOpacity = m_data.ignoreAlpha.has_value() ? *m_data.ignoreAlpha : m_data.discardOpacity,
@@ -133,7 +129,6 @@ void CGLElementRenderer::draw(WP<CTexPassElement> element, const CRegion& damage
 
             .primarySurfaceUVTopLeft     = g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft,
             .primarySurfaceUVBottomRight = g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight,
-            .motionBlur                  = m_data.motionBlur,
         });
 };
 

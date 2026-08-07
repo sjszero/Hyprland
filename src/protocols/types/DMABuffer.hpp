@@ -17,7 +17,7 @@ class CDMABuffer : public IHLBuffer {
     virtual void                                   endDataPtr();
     bool                                           good();
     void                                           closeFDs();
-    std::vector<Hyprutils::OS::CFileDescriptor>    exportSyncFiles();
+    Hyprutils::OS::CFileDescriptor                 exportSyncFile();
     bool                                           m_success = false;
 
   private:

@@ -6,20 +6,16 @@
 
 #define private public
 #include <src/managers/input/InputManager.hpp>
-#include <src/pointer/PointerManager.hpp>
-#include <src/pointer/PointerController.hpp>
+#include <src/managers/PointerManager.hpp>
 #include <src/managers/SeatManager.hpp>
 #include <src/managers/input/trackpad/TrackpadGestures.hpp>
-#include <src/output/Monitor.hpp>
+#include <src/helpers/Monitor.hpp>
 #include <src/desktop/rule/windowRule/WindowRuleEffectContainer.hpp>
 #include <src/desktop/rule/layerRule/LayerRuleEffectContainer.hpp>
 #include <src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <src/desktop/view/LayerSurface.hpp>
-#include <src/desktop/state/WindowState.hpp>
-#include <src/keybinds/Key.hpp>
 #include <src/Compositor.hpp>
 #include <src/desktop/state/FocusState.hpp>
-#include <src/state/MonitorState.hpp>
 #include <src/layout/LayoutManager.hpp>
 #undef private
 
@@ -51,48 +47,14 @@ static SDispatchResult snapMove(std::string in) {
     if (!PLASTWINDOW->m_isFloating)
         return {.success = false, .error = "Window must be floating"};
 
-    Vector2D pos  = PLASTWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_GOAL);
-    Vector2D size = PLASTWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
+    Vector2D pos  = PLASTWINDOW->m_realPosition->goal();
+    Vector2D size = PLASTWINDOW->m_realSize->goal();
 
     g_layoutManager->performSnap(pos, size, PLASTWINDOW->layoutTarget(), MBIND_MOVE, -1, size);
 
     PLASTWINDOW->layoutTarget()->setPositionGlobal(CBox{pos, size});
 
     return {};
-}
-
-// Perform a full move-drag of the window with the given class and drop it at (x, y).
-static SDispatchResult dragWindow(std::string in) {
-    CVarList2 data(std::move(in));
-
-    if (data.size() < 3)
-        return {.success = false, .error = "invalid input"};
-
-    const std::string cls = std::string{data[0]};
-
-    double            x;
-    double            y;
-    try {
-        x = std::stod(std::string{data[1]});
-        y = std::stod(std::string{data[2]});
-    } catch (...) { return {.success = false, .error = "invalid input"}; }
-
-    for (const auto& window : Desktop::windowState()->windows()) {
-        if (window->m_class != cls)
-            continue;
-
-        const auto target = window->layoutTarget();
-        if (!target)
-            return {.success = false, .error = "Window has no layout target"};
-
-        Pointer::pointerController()->warpTo({x, y}, true);
-        g_layoutManager->beginDragTarget(target, MBIND_MOVE);
-        g_layoutManager->endDragTarget();
-
-        return {};
-    }
-
-    return {.success = false, .error = std::format("No window with class '{}'", cls)};
 }
 
 class CTestKeyboard : public IKeyboard {
@@ -126,7 +88,16 @@ class CTestKeyboard : public IKeyboard {
     }
 
     void setMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {
-        updateModifiers(depressed, latched, locked, group);
+        m_modifiersState.depressed = depressed;
+        m_modifiersState.latched   = latched;
+        m_modifiersState.locked    = locked;
+        m_modifiersState.group     = group;
+        m_keyboardEvents.modifiers.emit(IKeyboard::SModifiersEvent{
+            .depressed = depressed,
+            .latched   = latched,
+            .locked    = locked,
+            .group     = group,
+        });
     }
 
     void destroy() {
@@ -169,7 +140,7 @@ SP<CTestKeyboard>      g_keyboard;
 SP<CTestKeyboard>      g_keyboard2;
 
 static SDispatchResult pressAlt(std::string in) {
-    g_pInputManager->m_lastMods = in == "1" ? Input::HL_MODIFIER_ALT : Input::HL_MODIFIER_NONE;
+    g_pInputManager->m_lastMods = in == "1" ? HL_MODIFIER_ALT : 0;
 
     return {.success = true};
 }
@@ -280,7 +251,7 @@ static SDispatchResult expectCursorZoom(std::string in) {
             return {.success = false, .error = "invalid input"};
     }
 
-    const auto PMONITOR = State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
+    const auto PMONITOR = g_pCompositor->getMonitorFromVector(g_pInputManager->getMouseCoordsInternal());
 
     if (!PMONITOR)
         return {.success = false, .error = "No monitor under cursor"};
@@ -394,9 +365,9 @@ static SDispatchResult keybind(std::string in) {
         key      = std::stoul(std::string{data[2]}) - 8; // xkb offset
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
-    Input::ModifierMask modifierMask = Input::HL_MODIFIER_NONE;
+    uint32_t modifierMask = 0;
     if (modifier > 0)
-        modifierMask = sc<Input::ModifierMask>(1 << (modifier - 1));
+        modifierMask = 1 << (modifier - 1);
     g_pInputManager->m_lastMods = modifierMask;
     g_keyboard->sendKey(key, press);
 
@@ -414,33 +385,11 @@ static SDispatchResult keybind2(std::string in) {
         key      = std::stoul(std::string{data[2]}) - 8;
     } catch (...) { return {.success = false, .error = "invalid input"}; }
 
-    Input::ModifierMask modifierMask = Input::HL_MODIFIER_NONE;
+    uint32_t modifierMask = 0;
     if (modifier > 0)
-        modifierMask = sc<Input::ModifierMask>(1 << (modifier - 1));
+        modifierMask = 1 << (modifier - 1);
     g_pInputManager->m_lastMods = modifierMask;
     g_keyboard2->sendKey(key, press);
-
-    return {};
-}
-
-static SDispatchResult keybindModmask(std::string in) {
-    CVarList2 data(std::move(in));
-    // 0 = release, 1 = press
-    bool press;
-    // See src/devices/IKeyboard.hpp : eKeyboardModifiers for modifier bitmasks
-    // 0 = none, eKeyboardModifiers is shifted to start at 1
-    uint32_t modifierMask;
-    // keycode
-    uint32_t key;
-    try {
-        press        = std::stoul(std::string{data[0]}) == 1;
-        modifierMask = std::stoul(std::string{data[1]});
-        key          = std::stoul(std::string{data[2]}) - 8; // xkb offset
-    } catch (...) { return {.success = false, .error = "invalid input"}; }
-
-    g_pInputManager->m_lastMods = g_pInputManager->xkbModsToHyprland(g_keyboard, modifierMask);
-    g_keyboard->setMods(modifierMask, 0, 0, 0);
-    g_keyboard->sendKey(key, press);
 
     return {};
 }
@@ -463,26 +412,6 @@ static SDispatchResult setMods(std::string in) {
 
 static SDispatchResult nullfocus(std::string in) {
     g_pSeatManager->setKeyboardFocus(nullptr);
-    return {};
-}
-
-static SDispatchResult clearSurfaceFocus(std::string in) {
-    Desktop::focusState()->m_focusSurface.reset();
-    return {};
-}
-
-static SDispatchResult checkKeyboardFocusWindow(std::string in) {
-    const auto KBSURF = g_pSeatManager->m_state.keyboardFocus.lock();
-    if (!KBSURF)
-        return {.success = false, .error = "No keyboard focus"};
-
-    const auto PWINDOW = Desktop::focusState()->window();
-    if (!PWINDOW)
-        return {.success = false, .error = "Keyboard focus surface is not a window"};
-
-    if (PWINDOW->m_class != in)
-        return {.success = false, .error = std::format("Keyboard focus window class is '{}', expected '{}'", PWINDOW->m_class, in)};
-
     return {};
 }
 
@@ -523,10 +452,10 @@ static SDispatchResult                                       addLayerRule(std::s
 }
 
 static SDispatchResult checkLayerRule(std::string in) {
-    if (Desktop::layerState()->layers().size() != 3)
+    if (g_pCompositor->m_layers.size() != 3)
         return {.success = false, .error = "Layers under test not here"};
 
-    for (const auto& layer : Desktop::layerState()->layers()) {
+    for (const auto& layer : g_pCompositor->m_layers) {
         if (layer->m_namespace == "rule-layer") {
 
             if (!layer->m_ruleApplicator->m_otherProps.props.contains(layerRuleIDX))
@@ -558,7 +487,7 @@ static SDispatchResult checkPointerFocusLayer(std::string in) {
     const auto LAYER  = Desktop::View::CLayerSurface::fromView(VIEW);
 
     if (!LAYER) {
-        const auto WINDOW = Desktop::viewState()->query().type(Desktop::View::VIEW_TYPE_WINDOW).surface(POINTERSURF).runWindow();
+        const auto WINDOW = g_pCompositor->getWindowFromSurface(POINTERSURF);
         if (WINDOW)
             return {.success = false, .error = std::format("Pointer focus is a window surface with class '{}'", WINDOW->m_class)};
 
@@ -572,7 +501,7 @@ static SDispatchResult checkPointerFocusLayer(std::string in) {
 }
 
 static SDispatchResult setPointerFocusLayer(std::string in) {
-    for (const auto& layer : Desktop::layerState()->layers()) {
+    for (const auto& layer : g_pCompositor->m_layers) {
         if (layer->m_namespace != in)
             continue;
 
@@ -591,10 +520,10 @@ static SDispatchResult setPointerFocusLayer(std::string in) {
 }
 
 static SDispatchResult softFocusWindowByClass(std::string in) {
-    for (const auto& window : Desktop::windowState()->windows()) {
-        if (window->m_class != in)
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (window->m_class != in) 
             continue;
-
+        
         Desktop::focusState()->rawWindowFocus(window, Desktop::FOCUS_REASON_FFM);
         return {};
     }
@@ -611,11 +540,11 @@ static SDispatchResult floatingFocusOnFullscreen(std::string in) {
     if (!PLASTWINDOW->m_isFloating)
         return {.success = false, .error = "Window must be floating"};
 
-    if (PLASTWINDOW->alphaTotalGoal() != 1.F)
+    if (PLASTWINDOW->alphaTotal() != 1.F)
         return {.success = false, .error = "floating window doesnt restore it opacity when focused on fullscreen workspace"};
 
-    if (!PLASTWINDOW->m_allowedOverFullscreen)
-        return {.success = false, .error = "floating window doesnt get flagged as allowedOverFullscreen"};
+    if (!PLASTWINDOW->m_createdOverFullscreen)
+        return {.success = false, .error = "floating window doesnt get flagged as createdOverFullscreen"};
 
     return {};
 }
@@ -634,13 +563,6 @@ static int luaTest(lua_State* L) {
 
 static int luaSnapMove(lua_State* L) {
     return luaResult(L, ::snapMove(""));
-}
-
-static int luaDragWindow(lua_State* L) {
-    const auto cls = std::string{luaL_checkstring(L, 1)};
-    const auto x   = (double)luaL_checknumber(L, 2);
-    const auto y   = (double)luaL_checknumber(L, 3);
-    return luaResult(L, ::dragWindow(std::format("{},{},{}", cls, x, y)));
 }
 
 static int luaVkb(lua_State* L) {
@@ -707,13 +629,6 @@ static int luaKeybind2(lua_State* L) {
     return luaResult(L, ::keybind2(std::format("{},{},{}", press, modifier, key)));
 }
 
-static int luaKeybindMask(lua_State* L) {
-    const auto press        = (int)luaL_checkinteger(L, 1);
-    const auto modifierMask = (int)luaL_checkinteger(L, 2);
-    const auto key          = (int)luaL_checkinteger(L, 3);
-    return luaResult(L, ::keybindModmask(std::format("{},{},{}", press, modifierMask, key)));
-}
-
 static int luaSetMods(lua_State* L) {
     const auto kbIndex   = (int)luaL_checkinteger(L, 1);
     const auto depressed = (int)luaL_checkinteger(L, 2);
@@ -725,14 +640,6 @@ static int luaSetMods(lua_State* L) {
 
 static int luaNullfocus(lua_State* L) {
     return luaResult(L, ::nullfocus(""));
-}
-
-static int luaClearSurfaceFocus(lua_State* L) {
-    return luaResult(L, ::clearSurfaceFocus(""));
-}
-
-static int luaCheckKeyboardFocusWindow(lua_State* L) {
-    return luaResult(L, ::checkKeyboardFocusWindow(luaL_checkstring(L, 1)));
 }
 
 static int luaAddWindowRule(lua_State* L) {
@@ -777,7 +684,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     addLuaFn("test", ::luaTest);
     addLuaFn("snapmove", ::luaSnapMove);
-    addLuaFn("drag_window", ::luaDragWindow);
     addLuaFn("vkb", ::luaVkb);
     addLuaFn("alt", ::luaAlt);
     addLuaFn("gesture", ::luaGesture);
@@ -788,11 +694,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addLuaFn("click", ::luaClick);
     addLuaFn("keybind", ::luaKeybind);
     addLuaFn("keybind2", ::luaKeybind2);
-    addLuaFn("keybind_modmask", ::luaKeybindMask);
     addLuaFn("set_mods", ::luaSetMods);
     addLuaFn("nullfocus", ::luaNullfocus);
-    addLuaFn("clear_surface_focus", ::luaClearSurfaceFocus);
-    addLuaFn("check_keyboard_focus_window", ::luaCheckKeyboardFocusWindow);
     addLuaFn("add_window_rule", ::luaAddWindowRule);
     addLuaFn("check_window_rule", ::luaCheckWindowRule);
     addLuaFn("add_layer_rule", ::luaAddLayerRule);

@@ -1,8 +1,6 @@
 #include "LuaBindingsInternal.hpp"
 
 #include "../../../desktop/rule/windowRule/WindowRule.hpp"
-#include "../../../state/MonitorState.hpp"
-#include "../../../state/WorkspaceState.hpp"
 
 using namespace Config;
 using namespace Config::Lua;
@@ -71,7 +69,7 @@ PHLMONITOR Internal::monitorFromLuaSelectorOrObject(lua_State* L, int idx, const
         return ref->lock();
 
     if (lua_isstring(L, idx) || lua_isnumber(L, idx))
-        return State::monitorState()->query().relativeTo(Desktop::focusState()->monitor()).configString(argStr(L, idx)).run();
+        return g_pCompositor->getMonitorFromString(argStr(L, idx));
 
     Internal::configError(L, "{}: expected a monitor object or selector", fnName);
     return nullptr;
@@ -91,17 +89,8 @@ PHLWORKSPACE Internal::workspaceFromLuaSelectorOrObject(lua_State* L, int idx, c
         return ws;
     }
 
-    if (lua_isstring(L, idx) || lua_isnumber(L, idx)) {
-        const auto id = getWorkspaceIDNameFromString(argStr(L, idx)).id;
-        if (id == WORKSPACE_INVALID)
-            return nullptr;
-
-        auto ws = State::workspaceState()->query().id(id).run();
-        if (!ws)
-            return nullptr;
-
-        return ws;
-    }
+    if (lua_isstring(L, idx) || lua_isnumber(L, idx))
+        return g_pCompositor->getWorkspaceByString(argStr(L, idx));
 
     Internal::configError(L, "{}: expected a workspace object or selector", fnName);
     return nullptr;
@@ -117,7 +106,7 @@ PHLWINDOW Internal::windowFromLuaSelectorOrObject(lua_State* L, int idx, const c
         return ref->lock();
 
     if (lua_isstring(L, idx) || lua_isnumber(L, idx))
-        return Desktop::viewState()->query().selector(argStr(L, idx)).runWindow();
+        return g_pCompositor->getWindowByRegex(argStr(L, idx));
 
     Internal::configError(L, "{}: expected a window object or selector", fnName);
     return nullptr;
@@ -198,8 +187,6 @@ std::optional<std::string> Internal::workspaceSelectorFromLuaSelectorOrObject(lu
             return std::nullopt;
         }
 
-        if (ws->m_isSpecialWorkspace)
-            return ws->m_name;
         return std::to_string(ws->m_id);
     }
 
@@ -328,7 +315,7 @@ std::optional<PHLWINDOW> Internal::windowFromUpval(lua_State* L, int idx) {
     if (lua_isnil(L, lua_upvalueindex(idx)))
         return std::nullopt;
 
-    return Desktop::viewState()->query().selector(lua_tostring(L, lua_upvalueindex(idx))).runWindow();
+    return g_pCompositor->getWindowByRegex(lua_tostring(L, lua_upvalueindex(idx)));
 }
 
 void Internal::pushWindowUpval(lua_State* L, int tableIdx) {
@@ -402,18 +389,18 @@ PHLWORKSPACE Internal::resolveWorkspaceStr(const std::string& args) {
     if (id == WORKSPACE_INVALID)
         return nullptr;
 
-    auto ws = State::workspaceState()->query().id(id).run();
+    auto ws = g_pCompositor->getWorkspaceByID(id);
     if (!ws) {
         const auto PMONITOR = Desktop::focusState()->monitor();
         if (PMONITOR)
-            ws = State::workspaceState()->create(id, PMONITOR->m_id, name, false);
+            ws = g_pCompositor->createNewWorkspace(id, PMONITOR->m_id, name, false);
     }
 
     return ws;
 }
 
 PHLMONITOR Internal::resolveMonitorStr(const std::string& args) {
-    auto mon = State::monitorState()->query().relativeTo(Desktop::focusState()->monitor()).configString(args).run();
+    auto mon = g_pCompositor->getMonitorFromString(args);
     return mon;
 }
 

@@ -12,19 +12,14 @@ class CSessionLockSurface;
 class CSessionLock;
 class CWLSurfaceResource;
 
-namespace Desktop::View {
-    class CSessionLock;
-}
-
 struct SSessionLockSurface {
     SSessionLockSurface(SP<CSessionLockSurface> surface_);
 
-    WP<CSessionLockSurface>         surface;
-    WP<CWLSurfaceResource>          pWlrSurface;
-    SP<Desktop::View::CSessionLock> view;
-    uint64_t                        iMonitorID = -1;
+    WP<CSessionLockSurface> surface;
+    WP<CWLSurfaceResource>  pWlrSurface;
+    uint64_t                iMonitorID = -1;
 
-    bool                            mapped = false;
+    bool                    mapped = false;
 
     struct {
         CHyprSignalListener map;
@@ -64,19 +59,11 @@ class CSessionLockManager {
     bool                    isSurfaceSessionLock(SP<CWLSurfaceResource>);
     bool                    anySessionLockSurfacesPresent();
 
-    void                    forceUnlock();
-    void                    forceLock();
-
     void                    removeSessionLockSurface(SSessionLockSurface*);
 
     void                    onLockscreenRenderedOnMonitor(uint64_t id);
 
     bool                    shallConsiderLockMissing();
-
-    struct {
-        CSignalT<> lock;
-        CSignalT<> unlock;
-    } m_events;
 
   private:
     UP<SSessionLock> m_sessionLock;
@@ -87,7 +74,6 @@ class CSessionLockManager {
 
     void onNewSessionLock(SP<CSessionLock> pWlrLock);
     void removeSendLockedTimer();
-    void clearSessionLock();
 };
 
 inline UP<CSessionLockManager> g_pSessionLockManager;

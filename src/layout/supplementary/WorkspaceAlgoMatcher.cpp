@@ -13,7 +13,7 @@
 #include "../algorithm/tiled/scrolling/ScrollingAlgorithm.hpp"
 #include "../algorithm/tiled/monocle/MonocleAlgorithm.hpp"
 
-#include "../../state/WorkspaceState.hpp"
+#include "../../Compositor.hpp"
 
 using namespace Layout;
 using namespace Layout::Supplementary;
@@ -113,25 +113,17 @@ SP<CAlgorithm> CWorkspaceAlgoMatcher::createAlgorithmForWorkspace(PHLWORKSPACE w
 }
 
 void CWorkspaceAlgoMatcher::updateWorkspaceLayouts() {
-    const auto WORKSPACES = State::workspaceState()->workspacesCopy();
-
     // TODO: make this ID-based, string comparison is slow
-    for (const auto& WORKSPACE : WORKSPACES) {
-        // Workspaces can briefly outlive usable layout state while monitor
-        // changes move or destroy them.
-        if (!WORKSPACE || WORKSPACE->inert() || !WORKSPACE->m_monitor || !WORKSPACE->m_space)
+    for (const auto& ws : g_pCompositor->getWorkspaces()) {
+        if (!ws)
             continue;
 
-        const auto ALGORITHM = WORKSPACE->m_space->algorithm();
-        if (!ALGORITHM)
-            continue;
-
-        const auto& TILED_ALGO = ALGORITHM->tiledAlgo();
+        const auto& TILED_ALGO = ws->m_space->algorithm()->tiledAlgo();
 
         if (!TILED_ALGO)
             continue;
 
-        const auto LAYOUT_TO_USE = tiledAlgoForWorkspace(WORKSPACE);
+        const auto LAYOUT_TO_USE = tiledAlgoForWorkspace(ws.lock());
 
         const auto CURRENT_LAYOUT = getNameForTiledAlgo(TILED_ALGO.get());
 
@@ -139,7 +131,7 @@ void CWorkspaceAlgoMatcher::updateWorkspaceLayouts() {
             continue;
 
         // needs a switchup
-        ALGORITHM->updateTiledAlgo(algoForNameTiled(LAYOUT_TO_USE));
+        ws->m_space->algorithm()->updateTiledAlgo(algoForNameTiled(LAYOUT_TO_USE));
     }
 }
 

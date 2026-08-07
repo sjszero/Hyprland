@@ -1,0 +1,14 @@
+hyprland (0.55.0+ds-1) unstable; urgency=medium
+
+  Starting from this upstream release, Hyprland supports Lua-based
+  configuration as a replacement for the legacy hyprlang (.conf) syntax.
+  If a hyprland.lua file is present, it will be loaded instead of
+  hyprland.conf.
+
+  Upstream has announced that the old hyprlang syntax will be supported
+  for 1-2 more releases after 0.55, after which it will be dropped.
+  Users are encouraged to migrate their configuration to Lua. Please
+  refer to the upstream wiki at https://wiki.hypr.land for migration
+  instructions.
+
+ -- Carl Keinath <carl.keinath@gmail.com>  Wed, 20 May 2026 22:40:06 +0200

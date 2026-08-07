@@ -1,0 +1,473 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Thu, 7 Aug 2026 13:00:00 +0800
+Subject: core: add Anland backend selection and clipboard relay
+
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index f9ef1a3..b4239cc 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -27,6 +27,10 @@
+ #include "managers/screenshare/ScreenshareManager.hpp"
+ #include <algorithm>
+ #include <aquamarine/output/Output.hpp>
++#include <fcntl.h>
++#include <poll.h>
++#include <unistd.h>
++#include <wayland-server-core.h>
+ #include <bit>
+ #include <ctime>
+ #include <random>
+@@ -52,6 +56,8 @@
+ #include "protocols/ColorManagement.hpp"
+ #include "protocols/core/Compositor.hpp"
+ #include "protocols/core/Subcompositor.hpp"
++#include "protocols/core/DataDevice.hpp"
++#include <aquamarine/backend/AnlandBackend.hpp>
+ #include "desktop/view/LayerSurface.hpp"
+ #include "layout/space/Space.hpp"
+ #include "render/Renderer.hpp"
+@@ -95,9 +101,67 @@
+ #include <malloc.h>
+ #include <unistd.h>
+ #include <xf86drm.h>
++#include <xkbcommon/xkbcommon.h>
+ 
+ using namespace Hyprutils::String;
+ using namespace Aquamarine;
++
++#include <thread>
++#include <poll.h>
++class CAnlandClipboardSource : public IDataSource {
++  public:
++    explicit CAnlandClipboardSource(const std::string& text) : m_text(text) {
++        m_mimeTypes = {
++            "text/plain;charset=utf-8",
++            "text/plain",
++            "UTF8_STRING",
++            "TEXT",
++            "STRING"
++        };
++    }
++    virtual std::vector<std::string> mimes() override { return m_mimeTypes; }
++    virtual void send(const std::string& mime, Hyprutils::OS::CFileDescriptor fd) override {
++        const std::string& data = m_text;
++        int fdCopy = fd.take();
++        std::string dataCopy = data;
++        std::thread([fdCopy, dataCopy]() {
++            size_t n = 0;
++            while (n < dataCopy.size()) {
++                ssize_t w = ::write(fdCopy, dataCopy.data() + n, dataCopy.size() - n);
++                if (w > 0) {
++                    n += w;
++                    continue;
++                }
++                if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
++                    /* Non-blocking pipe: wait for the reader instead of giving up.
++                     * Breaking here would close the fd with 0 bytes written and
++                     * the paste would come out empty. */
++                    struct pollfd pfd = {.fd = fdCopy, .events = POLLOUT};
++                    ::poll(&pfd, 1, 2000);
++                    continue;
++                }
++                break; /* EOF or fatal error */
++            }
++            ::close(fdCopy);
++        }).detach();
++    }
++    virtual void accepted(const std::string&) override {}
++    virtual void cancelled() override {}
++    virtual bool hasDnd() override { return false; }
++    virtual bool dndDone() override { return false; }
++    virtual void sendDndFinished() override {}
++    virtual bool used() override { return false; }
++    virtual void markUsed() override {}
++    virtual void error(uint32_t, const std::string&) override {}
++    virtual eDataSourceType type() override { return DATA_SOURCE_TYPE_WAYLAND; }
++    virtual uint32_t actions() override { return 0; }
++    virtual void sendDndDropPerformed() override {}
++    virtual void sendDndAction(wl_data_device_manager_dnd_action) override {}
++  private:
++    std::string m_text;
++    std::vector<std::string> m_mimeTypes;
++};
++
+ using enum NContentType::eContentType;
+ using namespace NColorManagement;
+ using namespace Desktop::View;
+@@ -314,9 +378,12 @@ void CCompositor::initServer(std::string socketName, int socketFd) {
+ 
+     std::vector<Aquamarine::SBackendImplementationOptions> implementations;
+     Aquamarine::SBackendImplementationOptions              option;
+-    option.backendType        = Aquamarine::eBackendType::AQ_BACKEND_HEADLESS;
++    option.backendType        = Aquamarine::eBackendType::AQ_BACKEND_ANLAND;
+     option.backendRequestMode = Aquamarine::eBackendRequestMode::AQ_BACKEND_REQUEST_MANDATORY;
+     implementations.emplace_back(option);
++    option.backendType        = Aquamarine::eBackendType::AQ_BACKEND_HEADLESS;
++    option.backendRequestMode = Aquamarine::eBackendRequestMode::AQ_BACKEND_REQUEST_IF_AVAILABLE;
++    implementations.emplace_back(option);
+     option.backendType        = Aquamarine::eBackendType::AQ_BACKEND_DRM;
+     option.backendRequestMode = Aquamarine::eBackendRequestMode::AQ_BACKEND_REQUEST_IF_AVAILABLE;
+     implementations.emplace_back(option);
+@@ -428,6 +495,9 @@ void CCompositor::initServer(std::string socketName, int socketFd) {
+ 
+     initManagers(STAGE_BASICINIT);
+ 
++    /* Anland clipboard relay is now called directly from
++     * CSeatManager::setCurrentSelection() — no signal listener needed. */
++
+     initManagers(STAGE_LATE);
+ 
+     for (auto const& o : pendingOutputs) {
+@@ -463,6 +533,186 @@ void CCompositor::initAllSignals() {
+         g_pInputManager->updateCapabilities();
+     });
+ 
++    // ── Anland clipboard relay ─────────────────────────────────────
++    // Bidirectional clipboard sync between Linux Wayland apps and the
++    // Android consumer, mirroring KWin's AnlandBackend clipboard handling.
++    // NOTE: g_pSeatManager is not yet initialized at this stage.
++    // We defer the clipboard registration until after initManagers(STAGE_BASICINIT).
++    // For now, just register the consumer callback (no listener dependency).
++    for (auto const& impl : m_aqBackend->getImplementations()) {
++        if (impl->type() != Aquamarine::AQ_BACKEND_ANLAND)
++            continue;
++        auto* anland = dynamic_cast<Aquamarine::CAnlandBackend*>(impl.get());
++        if (!anland)
++            continue;
++        m_pAnlandBackend = anland;
++        // Consumer -> producer: clipboard text arrived from Android.
++        anland->onClipboardFromConsumer = [](const char* text, size_t len, void* /*userdata*/) {
++            if (len == 0) {
++                Log::logger->log(Log::DEBUG, "anland: consumer cleared clipboard");
++                /* Android clipboard cleared: mirror it locally (KWin parity).
++                 * Loop-guarded downstream: our own CAnlandClipboardSource is
++                 * skipped by dynamic_cast, and the empty text cache stops the
++                 * echo from re-sending an empty clipboard back. */
++                if (g_pSeatManager)
++                    g_pSeatManager->setCurrentSelection(nullptr);
++                return;
++            }
++            std::string str(text, len);
++            Log::logger->log(Log::DEBUG, std::format("anland: consumer clipboard ({} bytes)", len));
++            if (g_pSeatManager) {
++                auto source = Hyprutils::Memory::makeShared<CAnlandClipboardSource>(str);
++                g_pSeatManager->setCurrentSelection(source);
++            }
++        };
++        // Consumer -> producer: IME text input from Android soft keyboard.
++        // Two-path strategy:
++        //   Path 1: text-input protocol (zwp_text_input_v3/v1) — best for clients
++        //           that bind the protocol (GTK, Qt, Firefox, foot, etc.)
++        //   Path 2: XKB keysym → keyboard event injection — universal fallback
++        //           that works with any client, including XWayland and simple apps.
++        anland->onTextFromConsumer = [](const char* text, size_t len, void* /*userdata*/) {
++            if (len == 0)
++                return;
++            std::string str(text, len);
++            fprintf(stderr, "anland: consumer text (%zu chars): '%s'\n", len, str.c_str());
++            Log::logger->log(Log::INFO, std::format("anland: consumer text ({} chars): '{}'", len, str));
++            if (!g_pInputManager) {
++                Log::logger->log(Log::ERR, "anland: no InputManager, dropping text");
++                return;
++            }
++            // ── Path 2 (PRIMARY): XKB keysym → keyboard event injection ──
++            // This is the proven path — uses the same onKeyboardKey mechanism as
++            // the consumer's extra keyboard bar, which the user confirmed works.
++            Log::logger->log(Log::INFO, std::format("anland: Path 2 — keyboard count={}", g_pInputManager->m_keyboards.size()));
++            SP<::IKeyboard> kb;
++            for (auto const& k : g_pInputManager->m_keyboards) {
++                if (k && k->m_xkbKeymap && k->m_xkbState) {
++                    kb = k;
++                    Log::logger->log(Log::INFO, "anland: Path 2 — found valid XKB keyboard");
++                    break;
++                }
++                if (k)
++                    Log::logger->log(Log::INFO, std::format("anland: Path 2 — keyboard '{}' keymap={} state={}",
++                        k->m_hlName, (bool)k->m_xkbKeymap, (bool)k->m_xkbState));
++            }
++            if (kb) {
++                // Use evdev keycodes (same as KeyCodeMapper.java in the consumer).
++                // US keyboard layout, level 0 (no shift) and level 1 (shift).
++                struct CharMapping { uint32_t cp; uint32_t evdev; bool shift; };
++                static const CharMapping charMap[] = {
++                    // ── level 0 (no shift) ──
++                    {'a', 30, false}, {'b', 48, false}, {'c', 46, false}, {'d', 32, false},
++                    {'e', 18, false}, {'f', 33, false}, {'g', 34, false}, {'h', 35, false},
++                    {'i', 23, false}, {'j', 36, false}, {'k', 37, false}, {'l', 38, false},
++                    {'m', 50, false}, {'n', 49, false}, {'o', 24, false}, {'p', 25, false},
++                    {'q', 16, false}, {'r', 19, false}, {'s', 31, false}, {'t', 20, false},
++                    {'u', 22, false}, {'v', 47, false}, {'w', 17, false}, {'x', 45, false},
++                    {'y', 21, false}, {'z', 44, false},
++                    {'0', 11, false}, {'1', 2, false},  {'2', 3, false},  {'3', 4, false},
++                    {'4', 5, false},  {'5', 6, false},  {'6', 7, false},  {'7', 8, false},
++                    {'8', 9, false},  {'9', 10, false},
++                    {'-', 12, false}, {'=', 13, false},
++                    {'[', 26, false}, {']', 27, false},
++                    {';', 39, false}, {'\'', 40, false},
++                    {',', 51, false}, {'.', 52, false}, {'/', 53, false},
++                    {'\\', 43, false}, {'`', 41, false},
++                    {' ', 57, false}, {'\t', 15, false}, {'\n', 28, false},
++                    // ── level 1 (shift) ──
++                    {'A', 30, true}, {'B', 48, true}, {'C', 46, true}, {'D', 32, true},
++                    {'E', 18, true}, {'F', 33, true}, {'G', 34, true}, {'H', 35, true},
++                    {'I', 23, true}, {'J', 36, true}, {'K', 37, true}, {'L', 38, true},
++                    {'M', 50, true}, {'N', 49, true}, {'O', 24, true}, {'P', 25, true},
++                    {'Q', 16, true}, {'R', 19, true}, {'S', 31, true}, {'T', 20, true},
++                    {'U', 22, true}, {'V', 47, true}, {'W', 17, true}, {'X', 45, true},
++                    {'Y', 21, true}, {'Z', 44, true},
++                    {'!', 2, true},  {'@', 3, true},  {'#', 4, true},  {'$', 5, true},
++                    {'%', 6, true},  {'^', 7, true},  {'&', 8, true},  {'*', 9, true},
++                    {'(', 10, true}, {')', 11, true},
++                    {'_', 12, true}, {'+', 13, true},
++                    {'{', 26, true}, {'}', 27, true},
++                    {':', 39, true}, {'"', 40, true},
++                    {'<', 51, true}, {'>', 52, true}, {'?', 53, true},
++                    {'|', 43, true}, {'~', 41, true},
++                };
++                constexpr uint32_t SHIFT_EVDEV = 42; // KEY_LEFTSHIFT
++                struct timespec now;
++                clock_gettime(CLOCK_MONOTONIC, &now);
++                uint32_t timeMs = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
++                const char* p   = str.data();
++                const char* end = p + str.size();
++                int injected     = 0;
++                while (p < end) {
++                    uint32_t      codepoint = 0;
++                    int           consumed  = 0;
++                    unsigned char c         = (unsigned char)*p;
++                    if ((c & 0x80) == 0) {
++                        codepoint = c;
++                        consumed  = 1;
++                    } else if ((c & 0xE0) == 0xC0 && p + 1 < end) {
++                        codepoint = ((c & 0x1F) << 6) | ((unsigned char)p[1] & 0x3F);
++                        consumed  = 2;
++                    } else if ((c & 0xF0) == 0xE0 && p + 2 < end) {
++                        codepoint = ((c & 0x0F) << 12) | (((unsigned char)p[1] & 0x3F) << 6) | ((unsigned char)p[2] & 0x3F);
++                        consumed  = 3;
++                    } else if ((c & 0xF8) == 0xF0 && p + 3 < end) {
++                        codepoint = ((c & 0x07) << 18) | (((unsigned char)p[1] & 0x3F) << 12) | (((unsigned char)p[2] & 0x3F) << 6) | ((unsigned char)p[3] & 0x3F);
++                        consumed  = 4;
++                    } else {
++                        p++;
++                        continue;
++                    }
++                    p += consumed;
++                    // Look up in our evdev table
++                    const CharMapping* m = nullptr;
++                    for (auto& cm : charMap) {
++                        if (cm.cp == codepoint) { m = &cm; break; }
++                    }
++                    if (!m) {
++                        Log::logger->log(Log::DEBUG, std::format("anland: no evdev mapping for U+{:04X}", codepoint));
++                        continue;
++                    }
++                    // Press Shift if needed
++                    if (m->shift) {
++                        // Update XKB state so the compositor knows Shift is active
++                        kb->updateXkbStateWithKey(SHIFT_EVDEV + 8, true);
++                        kb->updateModifiersState();
++                        ::IKeyboard::SKeyEvent shiftPress{timeMs, SHIFT_EVDEV, true, WL_KEYBOARD_KEY_STATE_PRESSED};
++                        g_pInputManager->onKeyboardKey(shiftPress, kb);
++                    }
++                    // Press + release the key
++                    ::IKeyboard::SKeyEvent pressEvent{timeMs, m->evdev, true, WL_KEYBOARD_KEY_STATE_PRESSED};
++                    g_pInputManager->onKeyboardKey(pressEvent, kb);
++                    ::IKeyboard::SKeyEvent releaseEvent{timeMs, m->evdev, false, WL_KEYBOARD_KEY_STATE_RELEASED};
++                    g_pInputManager->onKeyboardKey(releaseEvent, kb);
++                    // Release Shift
++                    if (m->shift) {
++                        ::IKeyboard::SKeyEvent shiftRelease{timeMs, SHIFT_EVDEV, false, WL_KEYBOARD_KEY_STATE_RELEASED};
++                        g_pInputManager->onKeyboardKey(shiftRelease, kb);
++                        kb->updateXkbStateWithKey(SHIFT_EVDEV + 8, false);
++                        kb->updateModifiersState();
++                    }
++                    injected++;
++                }
++                Log::logger->log(Log::INFO, std::format("anland: Path 2 — injected {} keystrokes", injected));
++                return;
++            }
++            Log::logger->log(Log::INFO, "anland: Path 2 failed — no XKB keyboard, falling back to Path 1");
++            // ── Path 1 (FALLBACK): text-input protocol ──
++            CTextInput* ti = g_pInputManager->m_relay.getFocusedTextInput();
++            if (ti && ti->isEnabled()) {
++                Log::logger->log(Log::INFO, "anland: using Path 1 (text-input protocol)");
++                ti->commitStringFromConsumer(str);
++                return;
++            }
++            if (ti)
++                Log::logger->log(Log::INFO, "anland: Path 1 skipped (text-input found but not enabled)");
++            else
++                Log::logger->log(Log::INFO, "anland: Path 1 skipped (no focused text-input)");
++            Log::logger->log(Log::ERR, "anland: both paths failed — text dropped");
++        };
++    }
++
+     m_aqBackend->events.newSwitch.listenStatic([](const SP<Aquamarine::ISwitch>& dev) {
+         Log::logger->log(Log::DEBUG, "New aquamarine switch with name {}", dev->getName());
+         g_pInputManager->newSwitch(dev);
+@@ -619,6 +869,75 @@ void CCompositor::cleanup() {
+     wl_display_destroy(m_wlDisplay);
+ }
+ 
++/* Anland clipboard relay: producer -> consumer.
++ * Fires on every Wayland selection change. Reads the payload (plain text,
++ * UTF-8 preferred) synchronously via a pipe and forwards it to the Android
++ * consumer. Loop guards mirroring KWin/mutter:
++ *   - our own CAnlandClipboardSource (set from the consumer) is skipped;
++ *   - identical text is skipped (cache);
++ *   - fallback (consumer disconnected) is skipped. */
++void CCompositor::onAnlandSelectionChanged() {
++    if (!m_pAnlandBackend || m_pAnlandBackend->inFallback())
++        return;
++
++    auto source = g_pSeatManager->m_selection.currentSelection.lock();
++    if (!source) {
++        if (!m_anlandClipboardText.empty()) {
++            m_anlandClipboardText.clear();
++            m_pAnlandBackend->sendClipboardToConsumer("");
++        }
++        return;
++    }
++
++    /* Loop guard: pointer comparison (KWin style: source == m_clipboardSource). */
++    if (dynamic_cast<CAnlandClipboardSource*>(source.get()))
++        return;
++
++    std::string mime;
++    for (const auto& m : source->mimes()) {
++        if (m == "text/plain;charset=utf-8") {
++            mime = m;
++            break;
++        }
++        if (m == "text/plain" && mime.empty())
++            mime = m;
++    }
++    if (mime.empty())
++        return;
++
++    /* KWin-style synchronous read: pipe + send + flush + poll/read loop.
++     * The owning client is a separate process — it receives the wl_data_source.send
++     * request after flush(), writes to the pipe, and closes the write end.  We poll
++     * with a 1s timeout per chunk; 0 on read means EOF (client finished). */
++    int p[2];
++    if (pipe2(p, O_CLOEXEC) != 0)
++        return;
++
++    source->send(mime, Hyprutils::OS::CFileDescriptor{p[1]});
++    wl_display_flush_clients(g_pCompositor->m_wlDisplay);
++
++    std::string text;
++    char        buf[4096];
++    struct pollfd pfd = {.fd = p[0], .events = POLLIN};
++    while (true) {
++        int pr = poll(&pfd, 1, 1000);
++        if (pr <= 0)
++            break;
++        ssize_t n = read(p[0], buf, sizeof(buf));
++        if (n <= 0)
++            break;
++        text.append(buf, n);
++    }
++    close(p[0]);
++
++    if (text.empty() || text == m_anlandClipboardText)
++        return;
++
++    m_anlandClipboardText = text;
++    Log::logger->log(Log::DEBUG, std::format("anland: forwarding clipboard ({} bytes)", text.size()));
++    m_pAnlandBackend->sendClipboardToConsumer(text);
++}
++
+ void CCompositor::initManagers(eManagersInitStage stage) {
+     switch (stage) {
+         case STAGE_PRIORITY: {
+@@ -3269,4 +3588,4 @@ std::optional<unsigned int> CCompositor::getVTNr() {
+ 
+ bool CCompositor::isVRRActiveOnAnyMonitor() const {
+     return std::ranges::any_of(m_monitors, [](const PHLMONITOR& m) { return m->m_vrrActive; });
+-}
++}
+\ No newline at end of file
+diff --git a/src/Compositor.hpp b/src/Compositor.hpp
+index 9847335..2fa1995 100644
+--- a/src/Compositor.hpp
++++ b/src/Compositor.hpp
+@@ -13,6 +13,7 @@
+ #include "config/shared/workspace/WorkspaceRule.hpp"
+ 
+ #include <aquamarine/backend/Backend.hpp>
++#include <aquamarine/backend/AnlandBackend.hpp>
+ #include <aquamarine/output/Output.hpp>
+ 
+ class CWLSurfaceResource;
+@@ -64,6 +65,7 @@ class CCompositor {
+     std::unordered_map<std::string, WORKSPACEID> m_seenMonitorWorkspaceMap; // map of seen monitor names to workspace IDs
+ 
+     void                                         initServer(std::string socketName, int socketFd);
++    void                                         onAnlandSelectionChanged();
+     void                                         startCompositor();
+     void                                         stopCompositor();
+     void                                         cleanup();
+@@ -178,6 +180,7 @@ class CCompositor {
+ 
+   private:
+     void                           initAllSignals();
++
+     void                           removeAllSignals();
+     void                           cleanEnvironment();
+     void                           setRandomSplash();
+@@ -194,6 +197,9 @@ class CCompositor {
+     Hyprutils::OS::CFileDescriptor m_watchdogWriteFd;
+ 
+     std::vector<PHLWORKSPACEREF>   m_workspaces;
++
++    Aquamarine::CAnlandBackend*    m_pAnlandBackend      = nullptr;
++    std::string                    m_anlandClipboardText;
+ };
+ 
+ inline UP<CCompositor> g_pCompositor;
+diff --git a/src/main.cpp b/src/main.cpp
+index 9d65ce2..50ddf0c 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -32,6 +32,7 @@ static void help() {
+     --socket NAME                - Sets the Wayland socket name (for Wayland socket handover)
+     --wayland-fd FD              - Sets the Wayland socket fd (for Wayland socket handover)
+     --watchdog-fd FD             - Used by start-hyprland
++    --anland                     - Use ANLAND backend (sets ANLAND=1)
+     --safe-mode                  - Starts Hyprland in safe mode
+     --systeminfo                 - Prints system infos
+     --i-am-really-stupid         - Omits root user privileges check (why would you do that?)
+@@ -161,6 +162,9 @@ int main(int argc, char** argv) {
+             } else if (value == "--safe-mode") {
+                 safeMode = true;
+                 continue;
++            } else if (value == "--anland") {
++                setenv("ANLAND", "1", 1);
++                continue;
+             } else if (value == "--watchdog-fd") {
+                 if (std::next(it) == args.end()) {
+                     help();
+@@ -280,4 +284,4 @@ int main(int argc, char** argv) {
+     Log::logger->log(Log::DEBUG, "Hyprland has reached the end.");
+ 
+     return EXIT_SUCCESS;
+-}
++}
+\ No newline at end of file
+diff --git a/src/managers/SeatManager.cpp b/src/managers/SeatManager.cpp
+index f2e1ff7..fff4868 100644
+--- a/src/managers/SeatManager.cpp
++++ b/src/managers/SeatManager.cpp
+@@ -584,6 +584,11 @@ void CSeatManager::setCurrentSelection(SP<IDataSource> source) {
+     }
+ 
+     m_events.setSelection.emit();
++
++    /* Anland clipboard relay: forward local Wayland selection changes
++     * to the Android consumer. Called directly here (not via signal
++     * listener) to avoid CHyprSignalListener RAII lifecycle issues. */
++    g_pCompositor->onAnlandSelectionChanged();
+ }
+ 
+ void CSeatManager::setCurrentPrimarySelection(SP<IDataSource> source) {

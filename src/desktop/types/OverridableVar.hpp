@@ -69,7 +69,7 @@ namespace Desktop::Types {
             return *this;
         }
 
-        void set(T const& value, eOverridePriority priority) {
+        void set(T value, eOverridePriority priority) {
             m_values[priority] = value;
         }
 
@@ -128,10 +128,9 @@ namespace Desktop::Types {
         }
 
         void increment(T const& other, eOverridePriority priority) {
-            if constexpr (std::is_same_v<T, bool>) {
-                const bool CURRENT = hasValue() ? value() : false;
-                m_values[priority] = CURRENT ^ other;
-            } else
+            if constexpr (std::is_same_v<T, bool>)
+                m_values[priority] = valueOr(false) ^ other;
+            else
                 m_values[priority] = clampOptional(valueOrDefault() + other, m_minValue, m_maxValue);
         }
 
@@ -150,7 +149,7 @@ namespace Desktop::Types {
         }
 
       private:
-        std::array<std::optional<T>, PRIORITY_END> m_values = {};
+        std::array<std::optional<T>, PRIORITY_END> m_values;
         std::optional<T>                           m_defaultValue; // used for toggling, so required for bool
         std::optional<T>                           m_minValue;
         std::optional<T>                           m_maxValue;

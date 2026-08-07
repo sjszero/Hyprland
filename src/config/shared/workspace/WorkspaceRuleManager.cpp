@@ -1,8 +1,7 @@
 #include "WorkspaceRuleManager.hpp"
 
 #include "../../../Compositor.hpp"
-#include "../../../output/Monitor.hpp"
-#include "../../../state/MonitorState.hpp"
+#include "../../../helpers/Monitor.hpp"
 
 #include <hyprutils/string/String.hpp>
 
@@ -18,17 +17,16 @@ void CWorkspaceRuleManager::clear() {
     m_rules.clear();
 }
 
-SP<CWorkspaceRule> CWorkspaceRuleManager::add(CWorkspaceRule&& x) {
-    return m_rules.emplace_back(makeShared<CWorkspaceRule>(std::move(x)));
+void CWorkspaceRuleManager::add(CWorkspaceRule&& x) {
+    m_rules.emplace_back(std::move(x));
 }
 
-SP<CWorkspaceRule> CWorkspaceRuleManager::replaceOrAdd(CWorkspaceRule&& x) {
-    auto it = std::ranges::find_if(m_rules, [&x](const auto& r) { return r->isEnabled() && r->m_workspaceString == x.m_workspaceString; });
+void CWorkspaceRuleManager::replaceOrAdd(CWorkspaceRule&& x) {
+    auto it = std::ranges::find_if(m_rules, [&x](const auto& r) { return r.m_enabled && r.m_workspaceString == x.m_workspaceString; });
     if (it == m_rules.end())
-        return add(std::move(x));
-
-    (*it)->mergeLeft(x);
-    return *it;
+        m_rules.emplace_back(std::move(x));
+    else
+        (*it).mergeLeft(x);
 }
 
 std::optional<CWorkspaceRule> CWorkspaceRuleManager::getWorkspaceRuleFor(PHLWORKSPACE workspace) {
@@ -36,13 +34,13 @@ std::optional<CWorkspaceRule> CWorkspaceRuleManager::getWorkspaceRuleFor(PHLWORK
 
     CWorkspaceRule mergedRule;
     for (auto const& rule : m_rules) {
-        if (!rule->isEnabled())
+        if (!rule.m_enabled)
             continue;
 
-        if (!workspace->matchesStaticSelector(rule->m_workspaceString))
+        if (!workspace->matchesStaticSelector(rule.m_workspaceString))
             continue;
 
-        mergedRule.mergeLeft(*rule);
+        mergedRule.mergeLeft(rule);
         any = true;
     }
 
@@ -52,16 +50,20 @@ std::optional<CWorkspaceRule> CWorkspaceRuleManager::getWorkspaceRuleFor(PHLWORK
     return mergedRule;
 }
 
-std::string CWorkspaceRuleManager::getDefaultWorkspaceFor(const Monitor::IMonitorIdentifiable& monitor) {
-    for (auto const& rule : m_rules) {
-        if (!rule->isEnabled())
+std::string CWorkspaceRuleManager::getDefaultWorkspaceFor(const std::string& name) {
+    for (auto other = m_rules.begin(); other != m_rules.end(); ++other) {
+        if (!other->m_enabled)
             continue;
 
-        if (!rule->m_isDefault.value_or(false))
-            continue;
-
-        if (monitor.matchesStaticSelector(rule->m_monitor))
-            return rule->m_workspaceString;
+        if (other->m_isDefault.value_or(false)) {
+            if (other->m_monitor == name)
+                return other->m_workspaceString;
+            if (other->m_monitor.starts_with("desc:")) {
+                auto const monitor = g_pCompositor->getMonitorFromDesc(trim(other->m_monitor.substr(5)));
+                if (monitor && monitor->m_name == name)
+                    return other->m_workspaceString;
+            }
+        }
     }
     return "";
 }
@@ -69,23 +71,23 @@ std::string CWorkspaceRuleManager::getDefaultWorkspaceFor(const Monitor::IMonito
 PHLMONITOR CWorkspaceRuleManager::getBoundMonitorForWS(const std::string& wsname) {
     auto monitor = getBoundMonitorStringForWS(wsname);
     if (monitor.starts_with("desc:"))
-        return State::monitorState()->query().description(trim(monitor.substr(5))).run();
+        return g_pCompositor->getMonitorFromDesc(trim(monitor.substr(5)));
     else
-        return State::monitorState()->query().name(monitor).run();
+        return g_pCompositor->getMonitorFromName(monitor);
 }
 
 std::string CWorkspaceRuleManager::getBoundMonitorStringForWS(const std::string& wsname) {
     for (auto const& wr : m_rules) {
-        if (!wr->isEnabled())
+        if (!wr.m_enabled)
             continue;
-        const auto WSNAME = wr->m_workspaceName.starts_with("name:") ? wr->m_workspaceName.substr(5) : wr->m_workspaceName;
+        const auto WSNAME = wr.m_workspaceName.starts_with("name:") ? wr.m_workspaceName.substr(5) : wr.m_workspaceName;
         if (WSNAME == wsname)
-            return wr->m_monitor;
+            return wr.m_monitor;
     }
 
     return "";
 }
 
-const std::vector<SP<CWorkspaceRule>>& CWorkspaceRuleManager::getAllWorkspaceRules() {
+const std::vector<CWorkspaceRule>& CWorkspaceRuleManager::getAllWorkspaceRules() {
     return m_rules;
 }

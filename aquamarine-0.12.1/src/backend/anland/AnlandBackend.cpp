@@ -1,0 +1,660 @@
+#include <aquamarine/backend/AnlandBackend.hpp>
+#include <aquamarine/backend/AnlandOutput.hpp>
+#include <aquamarine/allocator/GBM.hpp>
+#include <algorithm>
+#include <chrono>
+#include <cerrno>
+#include <cstring>
+#include <errno.h>
+#include <fcntl.h>
+#include <format>
+#include <functional>
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <sys/timerfd.h>
+#include <time.h>
+#include <unistd.h>
+
+extern "C" {
+#include "display_producer.h"
+#include "anland_audio.h"
+#include "anland_camera.h"
+}
+
+#include "Shared.hpp"
+#include "AnlandAllocator.hpp"
+#include "AnlandGesture.hpp"
+#include "AnlandGesture.hpp"
+
+using namespace Aquamarine;
+using namespace Hyprutils::Memory;
+using namespace Hyprutils::Math;
+template <typename T>
+using SP = CSharedPointer<T>;
+
+// ── CAnlandBackend ────────────────────────────────────────────────
+
+CAnlandBackend::CAnlandBackend(CSharedPointer<CBackend> backend)
+    : m_backend(backend) {
+    /* Create the 200ms heartbeat timerfd immediately. It fires every 200ms
+     * regardless of fallback state. When not in fallback, it probes the input
+     * data fd to detect disconnection (since the event loop's WL_EVENT_READABLE
+     * registration does NOT fire on POLLHUP alone). When in fallback, it drives
+     * the reconnect retry. */
+    m_heartbeatTimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (m_heartbeatTimerFd >= 0) {
+        struct itimerspec ts = {
+            .it_interval = { .tv_sec = 0, .tv_nsec = 200000000 }, /* 200ms */
+            .it_value    = { .tv_sec = 0, .tv_nsec = 200000000 },
+        };
+        timerfd_settime(m_heartbeatTimerFd, 0, &ts, nullptr);
+    }
+
+
+}
+
+CAnlandBackend::~CAnlandBackend() {
+    delete m_gesture;
+    m_gesture = nullptr;
+    anland_audio_stop();
+    anland_camera_stop();
+    if (m_inputDataFd >= 0)
+        close(m_inputDataFd);
+    if (m_heartbeatTimerFd >= 0)
+        close(m_heartbeatTimerFd);
+    if (m_display) {
+        ::disconnect((display_ctx*)m_display);
+        m_display = nullptr;
+    }
+}
+
+eBackendType CAnlandBackend::type() {
+    return AQ_BACKEND_ANLAND;
+}
+
+int CAnlandBackend::openRenderNode() {
+    int renderFd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+    if (renderFd < 0) {
+        for (int i = 0; i < 10; i++) {
+            std::string path = std::format("/dev/dri/renderD{}", 128 + i);
+            renderFd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+            if (renderFd >= 0)
+                break;
+        }
+    }
+    return renderFd;
+}
+
+bool CAnlandBackend::start() {
+    m_backend->log(AQ_LOG_TRACE, "anland: start");
+
+    /* Open render node unconditionally so Hyprland's linux-dmabuf protocol
+     * (and thus Xwayland) gets a valid DRM fd.  This must happen before
+     * connectToDaemon() so that the render node is available for the
+     * allocator fallback, but can also be opened here. */
+    if (m_renderNodeFd < 0)
+        m_renderNodeFd = openRenderNode();
+
+    /* Initialize PipeWire once (shared by audio & camera engines).
+     * anland_audio_start() and anland_camera_start() are idempotent
+     * but each calls pw_init() internally — only call one first. */
+    anland_audio_start();
+    anland_camera_start();
+
+    if (!connectToDaemon()) {
+        m_backend->log(AQ_LOG_ERROR, "anland: failed to connect to daemon");
+        return false;
+    }
+
+    // ── Create virtual input devices ──
+    if (!m_pointer) {
+        m_pointer = makeShared<CAnlandPointer>();
+        if (m_backend->ready)
+            m_backend->events.newPointer.emit(SP<IPointer>(m_pointer));
+    }
+    if (!m_keyboard) {
+        m_keyboard = makeShared<CAnlandKeyboard>();
+        if (m_backend->ready)
+            m_backend->events.newKeyboard.emit(SP<IKeyboard>(m_keyboard));
+    }
+    if (!m_touch) {
+        m_touch = makeShared<CAnlandTouch>();
+        if (m_backend->ready)
+            m_backend->events.newTouch.emit(SP<ITouch>(m_touch));
+    }
+
+    // ── Create allocator ──
+    if (m_haveDmabufs && m_display) {
+        auto dmabufAlloc = CAnlandDMABufAllocator::create((display_ctx*)m_display, CWeakPointer<CBackend>(m_backend));
+        if (dmabufAlloc) {
+            dmabufAlloc->setDisplayCtx((display_ctx*)m_display);
+            m_backend->primaryAllocator = dmabufAlloc;
+        } else {
+            m_backend->log(AQ_LOG_ERROR, "anland: FAILED to create dmabuf allocator");
+        }
+    }
+
+    if (!m_backend->primaryAllocator) {
+        int renderFd = m_renderNodeFd >= 0 ? m_renderNodeFd : openRenderNode();
+        if (renderFd >= 0) {
+            auto allocator = CGBMAllocator::create(renderFd, CWeakPointer<CBackend>(m_backend));
+            if (allocator) {
+                m_backend->primaryAllocator = allocator;
+                m_renderNodeFd = renderFd;
+            } else {
+                if (renderFd != m_renderNodeFd)
+                    close(renderFd);
+            }
+        }
+    }
+
+    SAnlandOutputOptions opts;
+    opts.size        = Vector2D((double)m_screenWidth, (double)m_screenHeight);
+    opts.refreshRate = (int)m_screenRefresh;
+    createOutput(opts);
+
+    return true;
+}
+
+bool CAnlandBackend::connectToDaemon() {
+    if (m_display) {
+        ::disconnect((display_ctx*)m_display);
+        m_display = nullptr;
+    }
+
+    const char* socketPathEnv = getenv("ANLAND_SOCKET");
+    std::string socketPath = socketPathEnv ? std::string(socketPathEnv) : "/run/display.sock";
+
+    display_ctx* ctx = nullptr;
+    if (::connect_to_deamon(&ctx, socketPath.c_str()) < 0) {
+        m_backend->log(AQ_LOG_ERROR, "anland: connect_to_deamon failed");
+        return false;
+    }
+    m_display = ctx;
+
+    uint32_t w = 0, h = 0, fmt = 0, refresh = 0;
+    if (::get_screen_info(ctx, &w, &h, &fmt, &refresh) < 0) {
+        m_backend->log(AQ_LOG_ERROR, "anland: get_screen_info failed");
+        ::disconnect(ctx);
+        m_display = nullptr;
+        return false;
+    }
+
+    m_screenWidth   = w;
+    m_screenHeight  = h;
+    m_screenRefresh = refresh > 0 ? refresh : 60000;
+
+    ::set_fallback_callback(ctx, [](void* userdata) {
+        auto* self = static_cast<CAnlandBackend*>(userdata);
+
+        /* Guard: if already in fallback, skip redundant work */
+        if (self->m_inFallback)
+            return;
+
+        self->m_inFallback = true;
+        self->m_bufReadyFd = -1;
+
+        /* Any pending frame belonged to the dead Consumer session.  Do not let
+         * the first buf_ready from its replacement complete that stale frame. */
+        for (const auto& output : self->m_outputs) {
+            if (output)
+                output->resetConsumerState();
+        }
+
+        /* release_consumer_resources() has just closed ctx->audio_fd.  The
+         * PipeWire loop keeps its SPA IO source otherwise; a closed SEQPACKET
+         * fd is permanently reported as EPOLLHUP, and PipeWire immediately
+         * re-dispatches it.  That turns the anland-audio thread into a tight
+         * epoll loop (and is accounted to the Hyprland process).  Detach the
+         * borrowed fd before returning to the Wayland event loop. */
+        anland_audio_set_fd(-1);
+
+        /* Clear camera resources (nodes stop recording, fds closed). */
+        anland_camera_clear();
+
+        /* Close the dup input data fd. The C library's original data_fd is
+         * already closed by release_consumer_resources() inside enter_fallback(). */
+        if (self->m_inputDataFd >= 0) {
+            close(self->m_inputDataFd);
+            self->m_inputDataFd = -1;
+        }
+
+        self->m_backend->log(AQ_LOG_DEBUG, "anland: >>> entered fallback (consumer disconnected)");
+
+        /* Notify the event loop that our pollFDs have changed:
+         * the old inputDataFd is gone, bufReadyFd is gone.
+         * The heartbeat timerfd stays registered (always present). */
+        self->m_backend->events.pollFDsChanged.emit();
+    }, this);
+
+    for (int attempt = 0; attempt < 300; attempt++) {
+        if (::try_exit_fallback(ctx) == 0) {
+            m_inFallback  = false;
+            m_haveDmabufs = ::get_buf_count(ctx) > 0;
+            m_bufReadyFd  = ::get_buffer_ready_fd(ctx);
+
+            if (m_bufReadyFd >= 0) {
+                int flags = fcntl(m_bufReadyFd, F_GETFL);
+                if (flags >= 0)
+                    fcntl(m_bufReadyFd, F_SETFL, flags | O_NONBLOCK);
+            }
+
+            /* Dup the data_fd for input polling (Niri approach: keep original in
+             * AnlandCtx for dmabuf reception, use dup for event-loop polling).
+             * This way, when the C library closes the original data_fd on fallback,
+             * our dup stays valid until we close it ourselves. */
+            int dataFd = ::get_data_fd(ctx);
+            if (dataFd >= 0) {
+                m_inputDataFd = fcntl(dataFd, F_DUPFD_CLOEXEC, 3);
+                if (m_inputDataFd >= 0) {
+                    int flags = fcntl(m_inputDataFd, F_GETFL);
+                    if (flags >= 0)
+                        fcntl(m_inputDataFd, F_SETFL, flags | O_NONBLOCK);
+                }
+            }
+
+            /* Attach the fresh audio socket to the persistent PipeWire engine. */
+            int audioFd = ::get_audio_fd(ctx);
+            if (audioFd >= 0)
+                anland_audio_set_fd(audioFd);
+
+            return true;
+        }
+        usleep(100000);
+    }
+
+    m_backend->log(AQ_LOG_ERROR, "anland: consumer did not connect within 30s, aborting");
+    ::disconnect(ctx);
+    m_display = nullptr;
+    return false;
+}
+
+std::vector<CSharedPointer<SPollFD>> CAnlandBackend::pollFDs() {
+    std::vector<CSharedPointer<SPollFD>> fds;
+
+    /* ── Heartbeat timerfd (always registered) ──────────────────────
+     * This 200ms periodic timerfd is the *only* mechanism that can detect
+     * consumer disconnection, because the Hyprland event loop registers
+     * aquamarine pollFDs with WL_EVENT_READABLE only — and POLLHUP alone
+     * does NOT trigger the callback.  The heartbeat ticks regardless of
+     * fallback state and performs the following:
+     *
+     *   Not in fallback:
+     *     recv(MSG_PEEK|MSG_DONTWAIT) on m_inputDataFd.
+     *       n == 0                  → consumer disconnected (EOF)
+     *       n < 0 && errno != EAGAIN → socket error / HUP
+     *     In either case, call ::poll_input_event(ctx, &dummy, 100) with
+     *     a non-zero timeout so the C library's internal poll() on the
+     *     original data_fd also detects the POLLHUP and triggers
+     *     enter_fallback() → our callback → m_inFallback=true + pollFDsChanged.
+     *
+     *   In fallback:
+     *     ::try_exit_fallback(ctx) to retry the consumer reconnect.
+     *     On success, re-dup the data_fd, rebuild the allocator/swapchain,
+     *     re-request camera, re-assert mouse capture, and emit pollFDsChanged. */
+    if (m_heartbeatTimerFd >= 0) {
+        fds.push_back(makeShared<SPollFD>(SPollFD{
+            .fd = m_heartbeatTimerFd,
+            .onSignal = [this]() {
+                /* Drain the timerfd */
+                uint64_t expirations;
+                read(m_heartbeatTimerFd, &expirations, sizeof(expirations));
+
+                display_ctx* ctx = (display_ctx*)m_display;
+                if (!ctx)
+                    return;
+
+                if (!m_inFallback) {
+                    /* ── Not in fallback: probe for disconnection ── */
+                    if (m_inputDataFd < 0)
+                        return;
+
+                    char peekBuf[1];
+                    ssize_t n = recv(m_inputDataFd, peekBuf, sizeof(peekBuf), MSG_PEEK | MSG_DONTWAIT);
+                    bool disconnected = false;
+                    if (n == 0) {
+                        m_backend->log(AQ_LOG_DEBUG, "anland: heartbeat detected disconnect (EOF)");
+                        disconnected = true;
+                    } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                        m_backend->log(AQ_LOG_DEBUG, std::format("anland: heartbeat detected disconnect (recv error: {})", strerror(errno)));
+                        disconnected = true;
+                    }
+
+                    if (disconnected) {
+                        /* Force enter_fallback() via the C library.
+                         * We call poll_input_event() with a non-zero timeout so
+                         * the C library's internal poll() on the original data_fd
+                         * detects the POLLHUP and calls enter_fallback() →
+                         * our callback → m_inFallback=true + pollFDsChanged. */
+                        InputEvent dummy;
+                        ::poll_input_event(ctx, &dummy, 100);
+
+                        /* If poll_input_event didn't trigger enter_fallback()
+                         * (e.g. the C library's poll returned 0 due to timeout=100
+                         * being too short), do it manually. */
+                        if (!m_inFallback) {
+                            m_backend->log(AQ_LOG_DEBUG, "anland: heartbeat forcing fallback manually");
+                            m_inFallback = true;
+                            if (m_inputDataFd >= 0) {
+                                close(m_inputDataFd);
+                                m_inputDataFd = -1;
+                            }
+                            m_bufReadyFd = -1;
+                            m_backend->events.pollFDsChanged.emit();
+                        }
+                    }
+                } else {
+                    /* ── In fallback: retry reconnect ── */
+                    if (::try_exit_fallback(ctx) != 0)
+                        return; /* Consumer still not ready, retry next tick */
+
+                    /* ── Consumer reconnected ── */
+                    m_backend->log(AQ_LOG_DEBUG, "anland: <<< left fallback (consumer reconnected)");
+
+                    m_inFallback  = false;
+                    m_haveDmabufs = ::get_buf_count(ctx) > 0;
+                    m_bufReadyFd  = ::get_buffer_ready_fd(ctx);
+                    if (m_bufReadyFd >= 0) {
+                        int flags = fcntl(m_bufReadyFd, F_GETFL);
+                        if (flags >= 0)
+                            fcntl(m_bufReadyFd, F_SETFL, flags | O_NONBLOCK);
+                    }
+
+                    /* Re-dup the data_fd for input polling */
+                    {
+                        int dataFd = ::get_data_fd(ctx);
+                        if (dataFd >= 0) {
+                            if (m_inputDataFd >= 0) {
+                                close(m_inputDataFd);
+                                m_inputDataFd = -1;
+                            }
+                            m_inputDataFd = fcntl(dataFd, F_DUPFD_CLOEXEC, 3);
+                            if (m_inputDataFd >= 0) {
+                                int flags = fcntl(m_inputDataFd, F_GETFL);
+                                if (flags >= 0)
+                                    fcntl(m_inputDataFd, F_SETFL, flags | O_NONBLOCK);
+                            }
+                        }
+                    }
+
+                    /* Re-attach audio and camera on reconnect. */
+                    {
+                        int audioFd = ::get_audio_fd(ctx);
+                        if (audioFd >= 0)
+                            anland_audio_set_fd(audioFd);
+                    }
+
+                    /* Re-read screen dimensions from first dmabuf info */
+                    if (m_haveDmabufs) {
+                        struct buf_info info;
+                        if (::get_dmabuf_info_at(ctx, 0, &info) == 0 && info.width > 0 && info.height > 0) {
+                            m_screenWidth  = (uint32_t)info.width;
+                            m_screenHeight = (uint32_t)info.height;
+                            m_backend->log(AQ_LOG_DEBUG, std::format("anland: screen dimensions updated to {}x{} after reconnect", (uint32_t)info.width, (uint32_t)info.height));
+                        }
+                    }
+
+                    /* Update output mode */
+                    if (!m_outputs.empty()) {
+                        auto output = m_outputs[0];
+                        output->modes.clear();
+                        output->modes.push_back(makeShared<SOutputMode>(
+                            Vector2D((double)m_screenWidth, (double)m_screenHeight),
+                            (int)m_screenRefresh, true));
+
+                        /* Emit state event with new size so Hyprland's CMonitor
+                         * updates its pixel size, transforms, and damage region. */
+                        output->events.state.emit(IOutput::SStateEvent{
+                            .size = Vector2D((double)m_screenWidth, (double)m_screenHeight),
+                        });
+                    }
+
+                    /* Rebuild allocator */
+                    if (m_haveDmabufs) {
+                        if (!m_outputs.empty())
+                            m_outputs[0]->swapchain.reset();
+
+                        m_backend->primaryAllocator.reset();
+
+                        auto dmabufAlloc = CAnlandDMABufAllocator::create(ctx, CWeakPointer<CBackend>(m_backend));
+                        if (dmabufAlloc) {
+                            dmabufAlloc->setDisplayCtx(ctx);
+                            m_backend->primaryAllocator = dmabufAlloc;
+                        }
+                    } else if (!m_backend->primaryAllocator) {
+                        int renderFd = m_renderNodeFd >= 0 ? m_renderNodeFd : openRenderNode();
+                        if (renderFd >= 0) {
+                            auto allocator = CGBMAllocator::create(renderFd, CWeakPointer<CBackend>(m_backend));
+                            if (allocator) {
+                                m_backend->primaryAllocator = allocator;
+                                m_renderNodeFd = renderFd;
+                            } else {
+                                if (renderFd != m_renderNodeFd)
+                                    close(renderFd);
+                            }
+                        }
+                    }
+
+                    rebuildSwapchain();
+
+                    /* Request camera service on reconnect */
+                    sendResourcesRequest(SERVICE_TYPE_CAMERA, 0, 0, 0);
+
+                    /* Re-assert mouse capture */
+                    if (m_captureMouseActive)
+                        sendConsumerVar(CONSUMER_VAR_CAPTURE_MOUSE, 1);
+
+                    /* Notify event loop: inputDataFd and bufReadyFd are back */
+                    m_backend->events.pollFDsChanged.emit();
+                }
+            },
+        }));
+    }
+
+    /* ── Input data fd (only when not in fallback) ────────────────── */
+    if (!m_inFallback && m_inputDataFd >= 0) {
+        fds.push_back(makeShared<SPollFD>(SPollFD{
+            .fd = m_inputDataFd,
+            .onSignal = [this]() { onInputReadable(); },
+        }));
+    }
+
+    /* ── Buffer ready eventfd (only when not in fallback) ─────────── */
+    if (!m_inFallback && m_bufReadyFd >= 0) {
+        fds.push_back(makeShared<SPollFD>(SPollFD{
+            .fd = m_bufReadyFd,
+            .onSignal = [this]() { onBufferReady(); },
+        }));
+    }
+
+    return fds;
+}
+
+void CAnlandBackend::rebuildSwapchain() {
+    if (m_outputs.empty() || !m_backend->primaryAllocator) {
+        return;
+    }
+
+    auto output = m_outputs[0];
+    output->swapchain.reset();
+
+    output->swapchain = CSwapchain::create(m_backend->primaryAllocator, self.lock());
+    if (output->swapchain) {
+        output->swapchain->reconfigure(SSwapchainOptions{
+            .length  = 4,
+            .size    = Vector2D((double)m_screenWidth, (double)m_screenHeight),
+            .format  = DRM_FORMAT_ABGR8888,
+            .scanout = true,
+        });
+        m_backend->log(AQ_LOG_DEBUG, "anland: swapchain rebuilt (length=5)");
+    }
+}
+
+void CAnlandBackend::onBufferReady() {
+    if (m_bufReadyFd >= 0) {
+        eventfd_t val;
+        eventfd_read(m_bufReadyFd, &val);
+    }
+
+    if (m_inFallback || m_outputs.empty())
+        return;
+
+    /* Emit input devices on the first onBufferReady() call.
+     * onBufferReady() is called from the event loop via pollFD callback,
+     * so Hyprland's signal handlers (CInputManager::newMouse etc.) are
+     * guaranteed to be fully initialized at this point. */
+    if (!m_inputDevicesEmitted) {
+        m_inputDevicesEmitted = true;
+        if (m_pointer)
+            m_backend->events.newPointer.emit(SP<IPointer>(m_pointer));
+        if (m_keyboard)
+            m_backend->events.newKeyboard.emit(SP<IKeyboard>(m_keyboard));
+        if (m_touch)
+            m_backend->events.newTouch.emit(SP<ITouch>(m_touch));
+    }
+
+    m_outputs[0]->onConsumerBufferReady();
+}
+
+uint32_t CAnlandBackend::capabilities() {
+    return 0; /* Anland: no hardware cursor plane, no DRM capabilities */
+}
+
+int CAnlandBackend::drmFD() {
+    return -1; /* Anland: no DRM master fd */
+}
+
+int CAnlandBackend::drmRenderNodeFD() {
+    return m_renderNodeFd >= 0 ? m_renderNodeFd : -1;
+}
+
+bool CAnlandBackend::dispatchEvents() {
+    /* dispatchEvents() is only called when explicitly registered as a pollFD
+     * callback. The anland backend registers onBufferReady() and
+     * onInputReadable() directly via pollFDs, so dispatchEvents() is NEVER
+     * invoked. Input device emission is handled in onInputReadable() instead. */
+    return true;
+}
+
+void CAnlandBackend::sendClipboardToConsumer(const std::string& text) {
+    display_ctx* ctx = (display_ctx*)m_display;
+    if (!ctx || m_inFallback)
+        return;
+
+    const uint32_t len = (uint32_t)text.size();
+    OutputEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = OUTPUT_TYPE_CLIPBOARD;
+    ev.clipboard.size = len;
+
+    if (len > 0) {
+        /* Variable-length event: send header + payload together */
+        ::push_output_event_with_length(ctx, &ev, const_cast<char*>(text.data()), len);
+    } else {
+        /* Empty clipboard: just send the header */
+        ::push_output_event(ctx, &ev);
+    }
+}
+
+void CAnlandBackend::sendResourcesRequest(uint32_t type, uint32_t arg0, uint32_t arg1, uint32_t arg2) {
+    display_ctx* ctx = (display_ctx*)m_display;
+    if (!ctx || m_inFallback)
+        return;
+
+    OutputEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = OUTPUT_TYPE_RESOURCES_REQUEST;
+    ev.resources_request.type = type;
+    ev.resources_request.args[0] = arg0;
+    ev.resources_request.args[1] = arg1;
+    ev.resources_request.args[2] = arg2;
+
+    ::push_output_event(ctx, &ev);
+}
+
+void CAnlandBackend::updateMouseCapture(bool active) {
+    if (active == m_captureMouseActive)
+        return;
+    m_captureMouseActive = active;
+    sendConsumerVar(CONSUMER_VAR_CAPTURE_MOUSE, active ? 1 : 0);
+}
+
+void CAnlandBackend::sendConsumerVar(uint32_t var, uint32_t value) {
+    display_ctx* ctx = (display_ctx*)m_display;
+    if (!ctx || m_inFallback)
+        return;
+
+    OutputEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = OUTPUT_TYPE_SET_CONSUMER_VAR;
+    ev.set_consumer_var.var   = var;
+    ev.set_consumer_var.value = value;
+
+    ::push_output_event(ctx, &ev);
+}
+
+void CAnlandBackend::onReady() {
+    /* Input devices are NOT emitted here because onReady() is called from
+     * CBackend::start(), which happens during CCompositor::initServer()—
+     * before Hyprland's signal handlers (CInputManager::newMouse etc.) are
+     * fully initialized.  Emitting here would cause a SEGV.
+     *
+     * Instead, input devices are emitted on the first dispatchEvents() call,
+     * which runs from the event loop after Hyprland is fully initialized. */
+}
+
+std::vector<SDRMFormat> CAnlandBackend::getRenderFormats() {
+    /* Consumer buffer is Android RGBA_8888 == DRM ABGR8888 (KWin mapping). */
+    return {
+        SDRMFormat{.drmFormat = DRM_FORMAT_ABGR8888, .modifiers = {DRM_FORMAT_INVALID}},
+        SDRMFormat{.drmFormat = DRM_FORMAT_XRGB8888, .modifiers = {DRM_FORMAT_INVALID}},
+    };
+}
+
+std::vector<SDRMFormat> CAnlandBackend::getCursorFormats() {
+    return {};
+}
+
+bool CAnlandBackend::createOutput(const SAnlandOutputOptions& options) {
+    auto output = CSharedPointer<CAnlandOutput>(new CAnlandOutput(self, options));
+    output->self = output;
+    m_outputs.push_back(output);
+
+    output->modes.push_back(makeShared<SOutputMode>(options.size, options.refreshRate, true));
+
+    if (m_backend->primaryAllocator) {
+        output->swapchain = CSwapchain::create(m_backend->primaryAllocator, self.lock());
+        if (output->swapchain) {
+            output->swapchain->reconfigure(SSwapchainOptions{
+                .length  = 4,
+                .size    = options.size,
+                .format  = DRM_FORMAT_ABGR8888,
+                .scanout = true,
+            });
+        }
+    }
+
+    m_backend->events.newOutput.emit(CSharedPointer<IOutput>(output));
+
+    return true;
+}
+
+CSharedPointer<IAllocator> CAnlandBackend::preferredAllocator() {
+    return m_backend->primaryAllocator;
+}
+
+std::vector<CSharedPointer<IAllocator>> CAnlandBackend::getAllocators() {
+    return {m_backend->primaryAllocator};
+}
+
+CWeakPointer<IBackendImplementation> CAnlandBackend::getPrimary() {
+    return {};
+}
+
+bool CAnlandBackend::createOutput(const std::string&) {
+    SAnlandOutputOptions opts;
+    opts.size        = Vector2D((double)m_screenWidth, (double)m_screenHeight);
+    opts.refreshRate = (int)m_screenRefresh;
+    return createOutput(opts);
+}

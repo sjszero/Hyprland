@@ -1,0 +1,58 @@
+name: Build Debian Anland packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Aquamarine and Hyprland Debian packages
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install build tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git build-essential devscripts debhelper equivs fakeroot \
+            pkg-config dpkg-dev
+
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Install Aquamarine build dependencies
+        working-directory: aquamarine-0.12.1
+        run: |
+          mk-build-deps --install --remove --tool 'apt-get -y' debian/control
+
+      - name: Build Aquamarine
+        working-directory: aquamarine-0.12.1
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Install the matching Aquamarine packages
+        run: |
+          apt-get install -y ../libaquamarine*.deb
+
+      - name: Install Hyprland build dependencies
+        run: |
+          mk-build-deps --install --remove --tool 'apt-get -y' debian/control
+
+      - name: Build Hyprland
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Collect packages
+        run: |
+          mkdir -p artifacts
+          find .. -maxdepth 1 -type f -name '*.deb' -exec cp -v {} artifacts/ ;
+          sha256sum artifacts/*.deb > artifacts/SHA256SUMS
+
+      - name: Upload Debian packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: anland-debian-packages
+          path: artifacts/

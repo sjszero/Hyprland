@@ -33,6 +33,11 @@ if(NOT HYPR_SHADER_GEN_RESULT EQUAL 0)
   )
 endif()
 
+execute_process(COMMAND xxd -i
+                INPUT_FILE ./example/hyprland.lua
+                OUTPUT_FILE ./src/config/lua/DefaultConfigBytes.hpp
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 find_package(PkgConfig REQUIRED)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -109,11 +114,13 @@ add_compile_options(
   -Wno-unused-parameter
   -Wno-unused-value
   -Wno-missing-field-initializers
+  -Wno-gnu-zero-variadic-macro-arguments
   -Wno-narrowing
   -Wno-pointer-arith
   -Wno-clobbered
   -frtti
-  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
+  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=
+  -D_FORTIFY_SOURCE=2)
 
 # disable lto as it may break plugins
 add_compile_options(-fno-lto)
@@ -129,24 +136,10 @@ set(GLES_VERSION "GLES3")
 find_package(OpenGL REQUIRED COMPONENTS ${GLES_VERSION})
 find_package(glslang CONFIG REQUIRED)
 
-find_package(glaze QUIET)
-if(NOT glaze_FOUND)
-  set(GLAZE_VERSION v7.2.0)
-  message(STATUS "glaze dependency not found, retrieving ${GLAZE_VERSION} with FetchContent")
-  include(FetchContent)
-  FetchContent_Declare(
-    glaze
-    GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-    GIT_TAG ${GLAZE_VERSION}
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL)
-  FetchContent_MakeAvailable(glaze)
-endif()
-
 set(AQUAMARINE_MINIMUM_VERSION 0.9.3)
 set(HYPRLANG_MINIMUM_VERSION 0.6.7)
 set(HYPRCURSOR_MINIMUM_VERSION 0.1.7)
-set(HYPRUTILS_MINIMUM_VERSION 0.14.0)
+set(HYPRUTILS_MINIMUM_VERSION 0.13.1)
 set(HYPRGRAPHICS_MINIMUM_VERSION 0.5.1)
 
 pkg_check_modules(aquamarine_dep REQUIRED IMPORTED_TARGET aquamarine>=${AQUAMARINE_MINIMUM_VERSION})
@@ -262,10 +255,11 @@ set_source_files_properties(${CMAKE_SOURCE_DIR}/src/version.h PROPERTIES GENERAT
 
 set(XKBCOMMON_MINIMUM_VERSION 1.11.0)
 set(WAYLAND_SERVER_MINIMUM_VERSION 1.22.91)
-set(WAYLAND_SERVER_PROTOCOLS_MINIMUM_VERSION 1.49)
-set(LIBINPUT_MINIMUM_VERSION 1.29)
+set(WAYLAND_SERVER_PROTOCOLS_MINIMUM_VERSION 1.47)
+set(LIBINPUT_MINIMUM_VERSION 1.28)
 
-pkg_check_modules(deps
+pkg_check_modules(
+  deps
   REQUIRED
   IMPORTED_TARGET GLOBAL
   xkbcommon>=${XKBCOMMON_MINIMUM_VERSION}
@@ -279,13 +273,11 @@ pkg_check_modules(deps
   xcursor
   libdrm
   libinput>=${LIBINPUT_MINIMUM_VERSION}
-  libeis-1.0
   gbm
   gio-2.0
   re2
   muparser
   lcms2
-  libcanberra
 )
 
 pkg_search_module(LUA REQUIRED IMPORTED_TARGET GLOBAL lua55 lua5.5 lua-55 lua-5.5 lua>=5.5 lua<5.6)
@@ -306,9 +298,35 @@ add_library(hyprland_lib STATIC ${SRCFILES})
 add_executable(Hyprland src/main.cpp ${TRACY_CPP_FILES})
 target_link_libraries(Hyprland hyprland_lib)
 
+# debian dumpabiver helper
+pkg_check_modules(
+  dumpabiver_deps
+  REQUIRED
+  IMPORTED_TARGET GLOBAL
+  libcrypto
+)
+add_executable(dumpabiver debian/dumpabiver.cpp)
+target_include_directories(dumpabiver PUBLIC ${dumpabiver_deps_INCLUDE_DIRS})
+target_link_libraries(dumpabiver hyprland_lib PkgConfig::dumpabiver_deps)
+
+add_custom_command(
+  OUTPUT debian-abi-helper
+  COMMAND dumpabiver > debian-abi-helper
+  DEPENDS dumpabiver
+)
+add_custom_target(
+  generate_abihelper
+  ALL
+  DEPENDS debian-abi-helper
+)
+install(
+  FILES ${CMAKE_BINARY_DIR}/debian-abi-helper
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/hyprland
+)
+# end dumpabiver stuff
+
 target_include_directories(hyprland_lib PUBLIC ${deps_INCLUDE_DIRS} ${LUA_INCLUDE_DIRS})
 target_include_directories(Hyprland PUBLIC ${deps_INCLUDE_DIRS} ${LUA_INCLUDE_DIRS})
-target_link_libraries(hyprland_lib PRIVATE glaze::glaze)
 
 set(USE_GPROF OFF)
 
@@ -373,15 +391,6 @@ check_include_file("sys/inotify.h" HAS_INOTIFY)
 pkg_check_modules(inotify IMPORTED_TARGET libinotify)
 if(NOT HAS_INOTIFY AND inotify_FOUND)
   target_link_libraries(hyprland_lib PUBLIC PkgConfig::inotify)
-endif()
-
-# sdbus-c++ is used to ask rtkit for realtime scheduling which is Linux-only
-if(NO_RTKIT OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(STATUS "rtkit realtime scheduling is disabled!")
-else()
-  pkg_check_modules(sdbus_dep REQUIRED IMPORTED_TARGET sdbus-c++>=2.0.0)
-  target_link_libraries(hyprland_lib PUBLIC PkgConfig::sdbus_dep)
-  add_compile_definitions(HAS_RTKIT)
 endif()
 
 if(NO_XWAYLAND)
@@ -538,7 +547,7 @@ else()
   target_link_libraries(hyprland_lib PUBLIC OpenGL::EGL OpenGL::GLES3 glslang::glslang glslang::glslang-default-resource-limits glslang::SPIRV Threads::Threads)
 endif()
 
-pkg_check_modules(hyprland_protocols_dep hyprland-protocols>=0.7.0)
+pkg_check_modules(hyprland_protocols_dep hyprland-protocols>=0.6.4)
 if(hyprland_protocols_dep_FOUND)
   pkg_get_variable(HYPRLAND_PROTOCOLS hyprland-protocols pkgdatadir)
   message(STATUS "hyprland-protocols dependency set to ${HYPRLAND_PROTOCOLS}")
@@ -561,7 +570,6 @@ protocolnew("protocols" "wlr-virtual-pointer-unstable-v1" true)
 protocolnew("protocols" "input-method-unstable-v2" true)
 protocolnew("protocols" "wlr-output-management-unstable-v1" true)
 protocolnew("protocols" "kde-server-decoration" true)
-protocolnew("protocols" "vicinae-hotkey-v1" true)
 protocolnew("protocols" "wlr-data-control-unstable-v1" true)
 protocolnew("${HYPRLAND_PROTOCOLS}/protocols" "hyprland-focus-grab-v1" true)
 protocolnew("protocols" "wlr-layer-shell-unstable-v1" true)
@@ -615,10 +623,7 @@ protocolnew("staging/fifo" "fifo-v1" false)
 protocolnew("staging/commit-timing" "commit-timing-v1" false)
 protocolnew("staging/ext-image-capture-source" "ext-image-capture-source-v1" false)
 protocolnew("staging/ext-image-copy-capture" "ext-image-copy-capture-v1" false)
-protocolnew("staging/ext-background-effect" "ext-background-effect-v1" false)
 
-protocolnew("${HYPRLAND_PROTOCOLS}/protocols" "hyprland-input-capture-v1"
-            true)
 protocolwayland()
 
 # tools
@@ -682,7 +687,7 @@ install(FILES ${MANPAGES} DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
 # pkgconfig entry
 install(FILES ${CMAKE_BINARY_DIR}/hyprland.pc
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 # protocol headers
 set(HEADERS_PROTO "${CMAKE_CURRENT_SOURCE_DIR}/protocols")

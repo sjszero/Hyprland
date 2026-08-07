@@ -65,27 +65,15 @@ void CShaderLoader::include(const std::string& filename) {
 }
 
 std::string CShaderLoader::getDefines(ShaderFeatureFlags features) {
-    static constexpr auto defines = std::to_array<std::pair<std::string_view, ePreparedFragmentShaderFeature>>({
-        {"USE_RGBA", SH_FEAT_RGBA},
-        {"USE_DISCARD", SH_FEAT_DISCARD},
-        {"USE_TINT", SH_FEAT_TINT},
-        {"USE_ROUNDING", SH_FEAT_ROUNDING},
-        {"USE_CM", SH_FEAT_CM},
-        {"USE_TONEMAP", SH_FEAT_TONEMAP},
-        {"USE_SDR_MOD", SH_FEAT_SDR_MOD},
-        {"USE_BLUR", SH_FEAT_BLUR},
-        {"USE_ICC", SH_FEAT_ICC},
-        {"USE_MIRROR", SH_FEAT_MIRROR},
-        {"USE_MOTION_BLUR", SH_FEAT_MOTION_BLUR},
-        {"USE_BLUR_ALPHA_MASK", SH_FEAT_BLUR_ALPHA_MASK},
-        {"USE_BLUR_MATTE", SH_FEAT_BLUR_MATTE},
-        {"USE_ALT_TONEMAP", SH_FEAT_ALT_TONEMAP},
-    });
-
-    std::string           res;
-    res.reserve(309);
-    for (const auto& [name, flag] : defines) {
-        std::format_to(std::back_inserter(res), "#define {} {}\n", name, (features & flag) != 0 ? '1' : '0');
+    std::string                        res     = "";
+    std::map<std::string, std::string> defines = {
+        {"USE_RGBA", features & SH_FEAT_RGBA ? "1" : "0"},         {"USE_DISCARD", features & SH_FEAT_DISCARD ? "1" : "0"}, {"USE_TINT", features & SH_FEAT_TINT ? "1" : "0"},
+        {"USE_ROUNDING", features & SH_FEAT_ROUNDING ? "1" : "0"}, {"USE_CM", features & SH_FEAT_CM ? "1" : "0"},           {"USE_TONEMAP", features & SH_FEAT_TONEMAP ? "1" : "0"},
+        {"USE_SDR_MOD", features & SH_FEAT_SDR_MOD ? "1" : "0"},   {"USE_BLUR", features & SH_FEAT_BLUR ? "1" : "0"},       {"USE_ICC", features & SH_FEAT_ICC ? "1" : "0"},
+        {"USE_MIRROR", features & SH_FEAT_MIRROR ? "1" : "0"},
+    };
+    for (const auto& [name, value] : defines) {
+        res += std::format("#define {} {}\n", name, value);
     }
     return res;
 }
@@ -124,7 +112,7 @@ std::string CShaderLoader::processSource(const std::string& source, glslang_stag
 
     while (std::getline(stream, line)) {
         if (!line.starts_with("#line "))
-            code += std::format("{}\n", line);
+            code += line + "\n";
     }
 
     glslang_shader_delete(shader);
@@ -149,7 +137,7 @@ std::string CShaderLoader::process(const std::string& filename, const std::map<s
 std::string CShaderLoader::getVariantSource(ePreparedFragmentShader frag, ShaderFeatureFlags features) {
     static const auto PCM = CConfigValue<Config::INTEGER>("render:cm_enabled");
     if (!*PCM)
-        features &= ~(SH_FEAT_CM | SH_FEAT_TONEMAP | SH_FEAT_ALT_TONEMAP | SH_FEAT_SDR_MOD);
+        features &= ~(SH_FEAT_CM | SH_FEAT_TONEMAP | SH_FEAT_SDR_MOD);
 
     if (!m_fragVariants[frag].contains(features)) {
         ASSERT(m_fragFiles[frag].length());
@@ -175,18 +163,16 @@ std::string CShaderLoader::loadShader(const std::string& filename) {
     }
     const auto home = Hyprutils::Path::getHome();
     if (home.has_value()) {
-        const auto src = NFsUtils::readFileAsString(std::format("{}/hypr/shaders/{}", home.value(), filename));
+        const auto src = NFsUtils::readFileAsString(home.value() + "/hypr/shaders/" + filename);
         if (src.has_value())
             return src.value();
     }
     for (auto& e : ASSET_PATHS) {
-        const auto src = NFsUtils::readFileAsString(std::format("{}/hypr/shaders/{}", e, filename));
+        const auto src = NFsUtils::readFileAsString(std::string{e} + "/hypr/shaders/" + filename);
         if (src.has_value())
             return src.value();
     }
-
-    const auto shader = std::ranges::lower_bound(SHADERS, filename, {}, [](const auto& filenameSource) { return filenameSource.first; });
-    if (shader != SHADERS.end() && shader->first == filename)
-        return std::string{shader->second};
+    if (SHADERS.contains(filename))
+        return SHADERS.at(filename);
     throw std::runtime_error(std::format("Couldn't load shader {}", filename));
 }

@@ -29,15 +29,13 @@ CONTROL COMMANDS
     Returns: *ok* on success, and an error message on failure.
 
     Examples:
-        **hyprctl** *dispatch "hl.dsp.exec_cmd('kitty')"*
+        **hyprctl** *dispatch exec kitty*
 
-        **hyprctl** *dispatch "hl.dsp.window.close()"*
+        **hyprctl** *dispatch pseudo x*
 
 **keyword**
 
     Set a config keyword dynamically.
-
-    This will not work if your config provider is lua (refer to **eval**)
 
     Returns: *ok* on success, and an error message on failure.
 
@@ -45,17 +43,6 @@ CONTROL COMMANDS
         **hyprctl** *keyword bind SUPER,0,pseudo*
 
         **hyprctl** *keyword general:border_size 10*
-
-**eval**
-
-    Evaluate arbitrary Lua expressions dynamically when using a Lua-based config provider.
-
-    Returns: *ok* on success, and an error message on failure.
-
-    Examples:
-        **hyprctl** *eval 'hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("firefox"))'*
-
-        **hyprctl** *eval 'hl.config({ general = { border_size = 10 } })'*
 
 **reload**
 

@@ -10,8 +10,7 @@ enum eAVarDamagePolicy : int8_t {
     AVARDAMAGE_NONE   = -1,
     AVARDAMAGE_ENTIRE = 0,
     AVARDAMAGE_BORDER,
-    AVARDAMAGE_SHADOW,
-    AVARDAMAGE_GLOW
+    AVARDAMAGE_SHADOW
 };
 
 enum eAnimatedVarType : int8_t {

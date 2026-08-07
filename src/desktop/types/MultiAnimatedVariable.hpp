@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <vector>
 
 #include "../../helpers/AnimatedVariable.hpp"
 
@@ -30,19 +29,15 @@ namespace Desktop::Types {
         }
     };
 
-    template <Animable VarType, typename Key, typename Operation = SMultiplyOperation<VarType>>
+    template <Animable VarType, typename Key, size_t Count, typename Operation = SMultiplyOperation<VarType>>
     class CMultiAnimatedVariableContainer {
       public:
         using value_type     = VarType;
         using key_type       = Key;
         using operation_type = Operation;
 
-        CMultiAnimatedVariableContainer(size_t cnt) {
-            m_vars.resize(cnt);
-        }
-
-        size_t size() const {
-            return m_vars.size();
+        static constexpr size_t size() {
+            return Count;
         }
 
         PHLANIMVAR<VarType>& get(const Key key) {
@@ -69,23 +64,23 @@ namespace Desktop::Types {
             return m_vars.at(i);
         }
 
-        std::vector<PHLANIMVAR<VarType>>& all() {
+        std::array<PHLANIMVAR<VarType>, Count>& all() {
             return m_vars;
         }
 
-        const std::vector<PHLANIMVAR<VarType>>& all() const {
+        const std::array<PHLANIMVAR<VarType>, Count>& all() const {
             return m_vars;
         }
 
         template <typename Fn>
         void forEach(Fn&& fn) {
-            for (size_t i = 0; i < m_vars.size(); ++i)
+            for (size_t i = 0; i < Count; ++i)
                 fn(static_cast<Key>(i), m_vars.at(i));
         }
 
         template <typename Fn>
         void forEach(Fn&& fn) const {
-            for (size_t i = 0; i < m_vars.size(); ++i)
+            for (size_t i = 0; i < Count; ++i)
                 fn(static_cast<Key>(i), m_vars.at(i));
         }
 
@@ -170,7 +165,7 @@ namespace Desktop::Types {
             VarType      result = Operation::identity();
             const size_t except = index(key);
 
-            for (size_t i = 0; i < m_vars.size(); ++i) {
+            for (size_t i = 0; i < Count; ++i) {
                 if (i == except || !m_vars.at(i))
                     continue;
 
@@ -180,9 +175,10 @@ namespace Desktop::Types {
             return result;
         }
 
-        std::vector<PHLANIMVAR<VarType>> m_vars;
+        std::array<PHLANIMVAR<VarType>, Count> m_vars;
     };
 
-    template <Animable VarType, typename Key, typename Operation = SMultiplyOperation<VarType>>
-    using CMultiAVarContainer = CMultiAnimatedVariableContainer<VarType, Key, Operation>;
+    template <Animable VarType, typename Key, size_t Count, typename Operation = SMultiplyOperation<VarType>>
+    using CMultiAVarContainer = CMultiAnimatedVariableContainer<VarType, Key, Count, Operation>;
+
 }

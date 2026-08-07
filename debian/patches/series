@@ -1,0 +1,15 @@
+add-fortify-flags-for-subprojects.patch
+embed.patch
+gcc-port.patch
+libcpp-port.patch
+Move-hyprland.pc-into-libdir.patch
+hyprpm-global-headers.patch
+useful-asset-error.patch
+Fix-shader-inclusion-order.patch
+Add-dumpabiver-abi-helper-to-main-CMakeLists.txt.patch
+Update-hyprland.pc-requires-to-include-lua.patch
+anland/0001-core-Add-Anland-backend-cli-clipboard-relay.patch
+anland/0002-input-Bridge-Anland-consumer-IME-text.patch
+anland/0003-start-Provide-Anland-audio-session-launcher.patch
+anland/0004-config-Use-normal-Hyprland-config-and-log-paths.patch
+anland/0005-render-Drop-hot-path-swapchain-debug-log.patch

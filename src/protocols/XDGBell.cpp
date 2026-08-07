@@ -1,29 +1,52 @@
 #include "XDGBell.hpp"
-#include "../helpers/BellSound.hpp"
-#include "./core/Compositor.hpp"
-#include "../desktop/state/ViewState.hpp"
-#include "../desktop/state/ViewQuery.hpp"
-#include "../event/EventBus.hpp"
-#include "../ipc/s2/S2.hpp"
-#include <format>
+#include "core/Compositor.hpp"
+#include "../desktop/view/Window.hpp"
+#include "../managers/EventManager.hpp"
+#include "../Compositor.hpp"
 
 CXDGSystemBellManagerResource::CXDGSystemBellManagerResource(UP<CXdgSystemBellV1>&& resource) : m_resource(std::move(resource)) {
     if UNLIKELY (!good())
         return;
 
-    m_resource->setDestroy([this](CXdgSystemBellV1*) { PROTO::xdgBell->destroyResource(this); });
-    m_resource->setOnDestroy([this](CXdgSystemBellV1*) { PROTO::xdgBell->destroyResource(this); });
+    m_resource->setDestroy([this](CXdgSystemBellV1* r) { PROTO::xdgBell->destroyResource(this); });
+    m_resource->setOnDestroy([this](CXdgSystemBellV1* r) { PROTO::xdgBell->destroyResource(this); });
 
-    m_resource->setRing([](CXdgSystemBellV1*, wl_resource* surface) {
-        const auto           WINDOW = Desktop::viewState()->query().surface(CWLSurfaceResource::fromResource(surface)).type(Desktop::View::VIEW_TYPE_WINDOW).runWindow();
-
-        Event::SCallbackInfo info;
-        Event::bus()->m_events.window.bell.emit(WINDOW, info);
-        if (info.cancelled)
+    m_resource->setRing([](CXdgSystemBellV1* r, wl_resource* surface) {
+        if (!surface) {
+            g_pEventManager->postEvent(SHyprIPCEvent{
+                .event = "bell",
+                .data  = "",
+            });
             return;
+        }
 
-        IPC::Socket2::sock()->postEvent({.event = "bell", .data = WINDOW ? std::format("{:x}", rc<uintptr_t>(WINDOW.get())) : ""});
-        CBellSound::play();
+        const auto SURFACE = CWLSurfaceResource::fromResource(surface);
+
+        if (!SURFACE) {
+            g_pEventManager->postEvent(SHyprIPCEvent{
+                .event = "bell",
+                .data  = "",
+            });
+            return;
+        }
+
+        for (const auto& w : g_pCompositor->m_windows) {
+            if (!w->m_isMapped || w->m_isX11 || !w->m_xdgSurface || !w->wlSurface())
+                continue;
+
+            if (w->wlSurface()->resource() == SURFACE) {
+                g_pEventManager->postEvent(SHyprIPCEvent{
+                    .event = "bell",
+                    .data  = std::format("{:x}", rc<uintptr_t>(w.get())),
+                });
+                return;
+            }
+        }
+
+        g_pEventManager->postEvent(SHyprIPCEvent{
+            .event = "bell",
+            .data  = "",
+        });
     });
 }
 

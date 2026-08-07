@@ -2,7 +2,9 @@
 
 #include "../../protocols/SessionLock.hpp"
 #include "../../protocols/core/Compositor.hpp"
-#include "../../output/Monitor.hpp"
+#include "../../helpers/Monitor.hpp"
+
+#include "../../Compositor.hpp"
 
 using namespace Desktop;
 using namespace Desktop::View;
@@ -13,7 +15,6 @@ SP<View::CSessionLock> View::CSessionLock::create(SP<CSessionLockSurface> resour
     lock->m_self    = lock;
 
     lock->init();
-    lock->initView(lock, VIEW_TYPE_LOCK_SCREEN);
 
     return lock;
 }
@@ -27,6 +28,8 @@ View::CSessionLock::~CSessionLock() {
 }
 
 void View::CSessionLock::init() {
+    m_listeners.destroy = m_surface->m_events.destroy.listen([this] { std::erase_if(g_pCompositor->m_otherViews, [this](const auto& e) { return e == m_self; }); });
+
     m_wlSurface->assign(m_surface->surface(), m_self.lock());
 }
 
@@ -52,30 +55,10 @@ std::optional<CBox> View::CSessionLock::surfaceLogicalBox() const {
     if (!visible())
         return std::nullopt;
 
-    const auto BOX = geometricBox(GEOMETRIC_CURRENT);
-
-    if (BOX.empty())
-        return std::nullopt;
-
-    return BOX;
-}
-
-Vector2D View::CSessionLock::position(eGeometricValueType) const {
-    return geometricBox(GEOMETRIC_CURRENT).pos();
-}
-
-Vector2D View::CSessionLock::size(eGeometricValueType) const {
-    return geometricBox(GEOMETRIC_CURRENT).size();
-}
-
-CBox View::CSessionLock::geometricBox(eGeometricValueType) const {
-    if (!m_surface)
-        return {};
-
     const auto MON = m_surface->monitor();
 
     if (!MON)
-        return {};
+        return std::nullopt;
 
     return MON->logicalBox();
 }

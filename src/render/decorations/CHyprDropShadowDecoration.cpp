@@ -1,13 +1,11 @@
 #include "CHyprDropShadowDecoration.hpp"
 
-#include <algorithm>
 #include "../../Compositor.hpp"
 #include "../../config/ConfigValue.hpp"
 #include "../pass/ShadowPassElement.hpp"
 #include "../Renderer.hpp"
 #include "../pass/RectPassElement.hpp"
 #include "../pass/TextureMatteElement.hpp"
-#include "../../state/MonitorState.hpp"
 
 CHyprDropShadowDecoration::CHyprDropShadowDecoration(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow), m_window(pWindow) {
     ;
@@ -46,8 +44,8 @@ void CHyprDropShadowDecoration::damageEntire() {
         return; // disabled
 
     const auto PWINDOW = m_window.lock();
-    const auto pos     = PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto size    = PWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto pos     = PWINDOW->m_realPosition->value();
+    const auto size    = PWINDOW->m_realSize->value();
 
     CBox       shadowBox = {pos.x - m_extents.topLeft.x, pos.y - m_extents.topLeft.y, pos.x + size.x + m_extents.bottomRight.x, pos.y + size.y + m_extents.bottomRight.y};
 
@@ -62,7 +60,7 @@ void CHyprDropShadowDecoration::damageEntire() {
 
     CRegion shadowRegion(shadowBox);
 
-    for (auto const& m : State::monitorState()->monitors()) {
+    for (auto const& m : g_pCompositor->m_monitors) {
         if (!g_pHyprRenderer->shouldRenderWindow(PWINDOW, m)) {
             const CRegion monitorRegion({m->m_position, m->m_size});
             shadowRegion.subtract(monitorRegion);
@@ -75,8 +73,8 @@ void CHyprDropShadowDecoration::damageEntire() {
 void CHyprDropShadowDecoration::updateWindow(PHLWINDOW pWindow) {
     const auto PWINDOW = m_window.lock();
 
-    m_lastWindowPos  = PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    m_lastWindowSize = PWINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    m_lastWindowPos  = PWINDOW->m_realPosition->value();
+    m_lastWindowSize = PWINDOW->m_realSize->value();
 
     m_lastWindowBox          = {m_lastWindowPos.x, m_lastWindowPos.y, m_lastWindowSize.x, m_lastWindowSize.y};
     m_lastWindowBoxWithDecos = g_pDecorationPositioner->getBoxWithIncludedDecos(pWindow);
@@ -86,7 +84,7 @@ void CHyprDropShadowDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     CShadowPassElement::SShadowData data;
     data.deco = this;
     data.a    = a;
-    g_pHyprRenderer->addPassElement(makeUnique<CShadowPassElement>(data));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CShadowPassElement>(data));
 }
 
 bool CHyprDropShadowDecoration::canRender(PHLMONITOR pMonitor) {
@@ -99,15 +97,8 @@ bool CHyprDropShadowDecoration::canRender(PHLMONITOR pMonitor) {
     if (!validMapped(PWINDOW))
         return false;
 
-    {
-        static constexpr auto HAS_ALPHA = [](const auto& c) { return c.a > 0.001f; };
-        if (std::none_of(PWINDOW->m_realShadowColor.m_colors.begin(), PWINDOW->m_realShadowColor.m_colors.end(), HAS_ALPHA)) {
-            if (!PWINDOW->m_shadowFadeAnimationProgress->isBeingAnimated())
-                return false;
-            if (std::none_of(PWINDOW->m_realShadowColorPrevious.m_colors.begin(), PWINDOW->m_realShadowColorPrevious.m_colors.end(), HAS_ALPHA))
-                return false;
-        }
-    }
+    if (PWINDOW->m_realShadowColor->value() == CHyprColor(0, 0, 0, 0))
+        return false; // don't draw invisible shadows
 
     if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault())
         return false;
@@ -199,22 +190,7 @@ void CHyprDropShadowDecoration::render(PHLMONITOR pMonitor, float const& a) {
 
     g_pHyprRenderer->disableScissor();
 
-    auto       grad     = PWINDOW->m_realShadowColor;
-    const bool ANIMATED = PWINDOW->m_shadowFadeAnimationProgress->isBeingAnimated();
-
-    if (PWINDOW->m_shadowAngleAnimationProgress->enabled()) {
-        grad.m_angle += PWINDOW->m_shadowAngleAnimationProgress->value() * M_PI * 2;
-        grad.m_angle = normalizeAngleRad(grad.m_angle);
-
-        if (ANIMATED)
-            PWINDOW->m_realShadowColorPrevious.m_angle = grad.m_angle;
-    }
-
-    if (ANIMATED)
-        drawShadowInternal(data.fullBox, data.rounding * pMonitor->m_scale, data.roundingPower, data.size * pMonitor->m_scale, PWINDOW->m_realShadowColorPrevious, grad,
-                           PWINDOW->m_shadowFadeAnimationProgress->value(), a);
-    else
-        drawShadowInternal(data.fullBox, data.rounding * pMonitor->m_scale, data.roundingPower, data.size * pMonitor->m_scale, grad, a);
+    drawShadowInternal(data.fullBox, data.rounding * pMonitor->m_scale, data.roundingPower, data.size * pMonitor->m_scale, PWINDOW->m_realShadowColor->value(), a);
 
     reposition();
 }
@@ -223,7 +199,7 @@ eDecorationLayer CHyprDropShadowDecoration::getDecorationLayer() {
     return DECORATION_LAYER_BOTTOM;
 }
 
-void CHyprDropShadowDecoration::drawShadowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad, float a) {
+void CHyprDropShadowDecoration::drawShadowInternal(const CBox& box, int round, float roundingPower, int range, CHyprColor color, float a) {
     static auto PSHADOWSHARP = CConfigValue<Config::INTEGER>("decoration:shadow:sharp");
 
     if (box.w < 1 || box.h < 1)
@@ -231,44 +207,17 @@ void CHyprDropShadowDecoration::drawShadowInternal(const CBox& box, int round, f
 
     g_pHyprRenderer->blend(true);
 
-    if (*PSHADOWSHARP) {
-        CHyprColor flatColor = grad.m_colors.empty() ? CHyprColor(0, 0, 0, 0) : grad.m_colors[0];
-        flatColor.a *= a;
+    color.a *= a;
+
+    if (*PSHADOWSHARP)
         g_pHyprRenderer->draw(
             CRectPassElement::SRectData{
                 .box           = box,
-                .color         = flatColor,
+                .color         = color,
                 .round         = round,
                 .roundingPower = roundingPower,
             },
             box);
-    } else
-        g_pHyprRenderer->drawShadow(box, round, roundingPower, range, grad, a);
-}
-
-void CHyprDropShadowDecoration::drawShadowInternal(const CBox& box, int round, float roundingPower, int range, const Config::CGradientValueData& grad1,
-                                                   const Config::CGradientValueData& grad2, float lerp, float a) {
-    static auto PSHADOWSHARP = CConfigValue<Config::INTEGER>("decoration:shadow:sharp");
-
-    if (box.w < 1 || box.h < 1)
-        return;
-
-    g_pHyprRenderer->blend(true);
-
-    if (*PSHADOWSHARP) {
-        CHyprColor col1 = grad1.m_colors.empty() ? CHyprColor(0, 0, 0, 0) : grad1.m_colors[0];
-        CHyprColor col2 = grad2.m_colors.empty() ? col1 : grad2.m_colors[0];
-        CHyprColor flatColor =
-            CHyprColor(col1.r + (col2.r - col1.r) * lerp, col1.g + (col2.g - col1.g) * lerp, col1.b + (col2.b - col1.b) * lerp, col1.a + (col2.a - col1.a) * lerp);
-        flatColor.a *= a;
-        g_pHyprRenderer->draw(
-            CRectPassElement::SRectData{
-                .box           = box,
-                .color         = flatColor,
-                .round         = round,
-                .roundingPower = roundingPower,
-            },
-            box);
-    } else
-        g_pHyprRenderer->drawShadow(box, round, roundingPower, range, grad1, grad2, lerp, a);
+    else
+        g_pHyprRenderer->drawShadow(box, round, roundingPower, range, color, 1.F);
 }

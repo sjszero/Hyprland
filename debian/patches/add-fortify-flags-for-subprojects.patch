@@ -1,0 +1,28 @@
+From: "Alan M Varghese (NyxTrail)" <alan@digistorm.in>
+Date: Tue, 18 Nov 2025 15:43:15 +0800
+Subject: Add FORTIFY_SOURCE flag directly in Makefile
+
+Last-Update: 2024-10-11
+Forwarded: not-needed
+
+The flag, otherwise, doesn't seem to propogate correctly to all
+modules built by the project. Use 'checksec' and 'hardening-check'
+for verifying fortification on binaries.
+---
+ CMakeLists.txt | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4d83b5c..52abd42 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -114,7 +114,8 @@ add_compile_options(
+   -Wno-pointer-arith
+   -Wno-clobbered
+   -frtti
+-  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
++  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=
++  -D_FORTIFY_SOURCE=2)
+ 
+ # disable lto as it may break plugins
+ add_compile_options(-fno-lto)

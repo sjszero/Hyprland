@@ -1,0 +1,20 @@
+From: Chow Loong Jin <hyperair@debian.org>
+Date: Thu, 14 May 2026 16:49:23 +0800
+Subject: Update hyprland.pc requires to include lua
+
+Fixes FTBFS in hyprland-plugins due to new transitive lua #includes.
+---
+ hyprland.pc.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hyprland.pc.in b/hyprland.pc.in
+index 0629d2d..11b3ba8 100644
+--- a/hyprland.pc.in
++++ b/hyprland.pc.in
+@@ -4,5 +4,5 @@ Name: Hyprland
+ URL: https://github.com/hyprwm/Hyprland
+ Description: Hyprland header files
+ Version: @HYPRLAND_VERSION@
+-Requires: aquamarine >= @AQUAMARINE_MINIMUM_VERSION@, hyprcursor >= @HYPRCURSOR_MINIMUM_VERSION@, hyprgraphics >= @HYPRGRAPHICS_MINIMUM_VERSION@, hyprlang >= @HYPRLANG_MINIMUM_VERSION@, hyprutils >= @HYPRUTILS_MINIMUM_VERSION@, libdrm, egl, cairo, xkbcommon >= @XKBCOMMON_MINIMUM_VERSION@, libinput >= @LIBINPUT_MINIMUM_VERSION@, wayland-server >= @WAYLAND_SERVER_MINIMUM_VERSION@@PKGCONFIG_XWAYLAND_DEPENDENCIES@
++Requires: aquamarine >= @AQUAMARINE_MINIMUM_VERSION@, hyprcursor >= @HYPRCURSOR_MINIMUM_VERSION@, hyprgraphics >= @HYPRGRAPHICS_MINIMUM_VERSION@, hyprlang >= @HYPRLANG_MINIMUM_VERSION@, hyprutils >= @HYPRUTILS_MINIMUM_VERSION@, libdrm, egl, cairo, xkbcommon >= @XKBCOMMON_MINIMUM_VERSION@, libinput >= @LIBINPUT_MINIMUM_VERSION@, @LUA_MODULE_NAME@, wayland-server >= @WAYLAND_SERVER_MINIMUM_VERSION@@PKGCONFIG_XWAYLAND_DEPENDENCIES@
+ Cflags: -I${prefix} -I${prefix}/hyprland/protocols -I${prefix}/hyprland -I${prefix}/hyprland/src

@@ -1,5 +1,4 @@
 #include "../../hyprctlCompat.hpp"
-#include "../../Log.hpp"
 #include "../shared.hpp"
 #include "tests.hpp"
 #include "build.hpp"
@@ -8,7 +7,6 @@
 #include <hyprutils/os/Process.hpp>
 
 #include <optional>
-#include <format>
 #include <sys/poll.h>
 #include <unistd.h>
 #include <csignal>
@@ -34,7 +32,7 @@ namespace {
 }
 
 CClient::CClient() {
-    this->proc = makeShared<CProcess>(std::format("{}/pointer-scroll", binaryDir), std::vector<std::string>{});
+    this->proc = makeShared<CProcess>(binaryDir + "/pointer-scroll", std::vector<std::string>{});
 
     this->proc->addEnv("WAYLAND_DISPLAY", WLDISPLAY);
 

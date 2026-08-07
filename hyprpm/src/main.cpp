@@ -108,11 +108,10 @@ int                        main(int argc, char** argv, char** envp) {
         if (command.size() >= 3)
             rev = command[2];
 
-        const auto RUNNINGHLVER   = g_pPluginManager->getHyprlandVersion();
-        const auto INSTALLEDHLVER = g_pPluginManager->getHyprlandVersion(false);
-        auto       GLOBALSTATE    = DataState::getGlobalState();
+        const auto HLVER       = g_pPluginManager->getHyprlandVersion();
+        auto       GLOBALSTATE = DataState::getGlobalState();
 
-        if (GLOBALSTATE.headersAbiCompiled != RUNNINGHLVER.abiHash || GLOBALSTATE.headersAbiCompiled != INSTALLEDHLVER.abiHash) {
+        if (GLOBALSTATE.headersAbiCompiled != HLVER.abiHash) {
             std::println(stderr, "{}", failureString("Headers outdated, please run hyprpm update."));
             return 1;
         }
@@ -137,34 +136,28 @@ int                        main(int argc, char** argv, char** envp) {
         NSys::root::cacheSudo();
         CScopeGuard x([] { NSys::root::dropSudo(); });
 
-        const auto  HLVER            = g_pPluginManager->getHyprlandVersion(false);
-        const auto  GLOBALSTATE      = DataState::getGlobalState();
-        const bool  COMPILEDOUTDATED = HLVER.abiHash != GLOBALSTATE.headersAbiCompiled;
-        const bool  headersValid     = g_pPluginManager->headersValid() == HEADERS_OK;
-        const bool  headers          = g_pPluginManager->updateHeaders(force);
+        bool        headersValid = g_pPluginManager->headersValid() == HEADERS_OK;
+        bool        headers      = g_pPluginManager->updateHeaders(force);
 
         if (headers) {
-            const bool pluginsUpdated = g_pPluginManager->updatePlugins(!headersValid || force || COMPILEDOUTDATED);
+            const auto HLVER            = g_pPluginManager->getHyprlandVersion(false);
+            auto       GLOBALSTATE      = DataState::getGlobalState();
+            const auto COMPILEDOUTDATED = HLVER.abiHash != GLOBALSTATE.headersAbiCompiled;
 
-            if (!pluginsUpdated && COMPILEDOUTDATED) {
-                std::println(stderr, "{}",
-                             failureString("Hyprland's ABI changed and some repositories failed to update: no plugins will be loaded until every repository updates "
-                                           "successfully.\n  Fix or remove the failed repositories, then re-run hyprpm update."));
-                g_pPluginManager->notify(ICON_ERROR, 0, 10000,
-                                         "[hyprpm] Some plugin repos failed to update, no plugins were loaded. Fix or remove them, then re-run hyprpm update.");
+            bool       ret1 = g_pPluginManager->updatePlugins(!headersValid || force || COMPILEDOUTDATED);
+
+            if (!ret1)
                 return 1;
-            }
 
-            const auto loadState = g_pPluginManager->ensurePluginsLoadState();
+            auto ret2 = g_pPluginManager->ensurePluginsLoadState();
 
-            if (loadState == LOADSTATE_HYPRLAND_UPDATED)
+            if (ret2 == LOADSTATE_HYPRLAND_UPDATED)
                 g_pPluginManager->notify(ICON_INFO, 0, 10000, "[hyprpm] Updated plugins, but Hyprland was updated. Please restart Hyprland.");
 
-            if (!pluginsUpdated || loadState != LOADSTATE_OK)
+            if (ret2 != LOADSTATE_OK)
                 return 1;
         } else {
             g_pPluginManager->notify(ICON_ERROR, 0, 10000, "[hyprpm] Couldn't update headers");
-            return 1;
         }
     } else if (command[0] == "enable") {
         if (command.size() < 2) {

@@ -2,10 +2,14 @@
 #include "../../shared.hpp"
 #include "../../hyprctlCompat.hpp"
 #include <cstdint>
+#include <print>
 #include <string>
-#include <format>
+#include <thread>
+#include <chrono>
 #include <hyprutils/os/Process.hpp>
 #include <hyprutils/memory/WeakPtr.hpp>
+#include <csignal>
+#include <cerrno>
 #include "../shared.hpp"
 
 using namespace Hyprutils::OS;
@@ -26,7 +30,7 @@ static std::string getCommandStdOut(std::string command) {
 }
 
 static void setWindowProp(const std::string& selector, const std::string& prop, const std::string& value) {
-    getFromSocket(std::format("/dispatch hl.dsp.window.set_prop({{ window = '{}', prop = '{}', value = '{}' }})", selector, prop, value));
+    getFromSocket("/dispatch hl.dsp.window.set_prop({ window = '" + selector + "', prop = '" + prop + "', value = '" + value + "' })");
 }
 
 TEST_CASE(hyprctlDevicesActiveLayoutIndex) {
@@ -35,9 +39,9 @@ TEST_CASE(hyprctlDevicesActiveLayoutIndex) {
 
     for (uint8_t i = 0; i < 3; i++) {
         // set layout
-        getFromSocket(std::format("/switchxkblayout all {}", i));
+        getFromSocket("/switchxkblayout all " + std::to_string(i));
         std::string devicesJson = getFromSocket("j/devices");
-        std::string expected    = std::format(R"("active_layout_index": {})", i);
+        std::string expected    = R"("active_layout_index": )" + std::to_string(i);
         // check layout index
         EXPECT_CONTAINS(devicesJson, expected);
     }
@@ -166,45 +170,4 @@ TEST_CASE(hyprctlJsonErrors) {
     jqProc.addEnv("HYPRLAND_INSTANCE_SIGNATURE", HIS);
     jqProc.runSync();
     EXPECT(jqProc.exitCode(), 0);
-}
-
-TEST_CASE(hyprctlBindsJson) {
-    EXPECT(getFromSocket("/eval hl.bind('SUPER + F12', hl.dsp.exec_cmd('true'), { description = 'hyprctl binds JSON regression', locked = true, repeating = true, "
-                         "allow_input_capture = false })"),
-           "ok");
-
-    CProcess jqProc("bash", {"-c", R"(hyprctl -j binds | jq -e '
-        type == "array" and
-        ([.[] | select(.key == "F12")] | length == 1) and
-        any(.[];
-            .key == "F12" and
-            .has_description == true and
-            (.description | type) == "string" and
-            .description == "hyprctl binds JSON regression" and
-            (.allow_input_capture | type) == "boolean" and
-            .allow_input_capture == false
-        )
-    ')"});
-    jqProc.addEnv("HYPRLAND_INSTANCE_SIGNATURE", HIS);
-    jqProc.runSync();
-    EXPECT(jqProc.exitCode(), 0);
-
-    const auto BINDS    = getFromSocket("/binds");
-    const auto DESC_POS = BINDS.find("description: hyprctl binds JSON regression");
-    EXPECT(DESC_POS != std::string::npos, true);
-    if (DESC_POS != std::string::npos) {
-        const auto BIND_POS = BINDS.rfind("bind\n", DESC_POS);
-        EXPECT(BIND_POS != std::string::npos, true);
-        if (BIND_POS != std::string::npos) {
-            const auto BLOCK = BINDS.substr(BIND_POS, DESC_POS - BIND_POS);
-            EXPECT(BLOCK.contains("\tflags: locked, repeat\n"), true);
-        }
-    }
-
-    EXPECT(getFromSocket("/eval hl.unbind('SUPER + F12')"), "ok");
-}
-
-TEST_CASE(hyprctlREPL) {
-    EXPECT(getCommandStdOut("hyprctl repl 'print(type(hl))'"), "table");
-    EXPECT(getCommandStdOut("hyprctl eval 'print(type(hl))'"), "ok");
 }

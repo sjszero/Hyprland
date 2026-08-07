@@ -101,13 +101,10 @@ int main(int argc, const char** argv, const char** envp) {
     if (Nix::shouldUseNixGL())
         g_logger->log(Hyprutils::CLI::LOG_DEBUG, "Hyprland was compiled with Nix - will use nixGL");
 
-    bool safeMode    = false;
-    bool lockedCrash = false;
-
+    bool safeMode = false;
     while (true) {
         g_instance     = makeUnique<CHyprlandInstance>();
-        const bool RET = g_instance->run(safeMode, lockedCrash);
-        lockedCrash    = g_instance->m_hyprlandLocked;
+        const bool RET = g_instance->run(safeMode);
         g_instance.reset();
 
         if (!RET) {

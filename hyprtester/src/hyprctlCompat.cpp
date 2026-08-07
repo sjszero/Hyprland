@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <csignal>
 #include <cerrno>
-#include <format>
 #include <print>
 #include <hyprutils/memory/Casts.hpp>
 using namespace Hyprutils::Memory;
@@ -27,10 +26,12 @@ static int getUID() {
 static std::string getRuntimeDir() {
     const auto XDG = getenv("XDG_RUNTIME_DIR");
 
-    if (!XDG)
-        return std::format("/run/user/{}/hypr", getUID());
+    if (!XDG) {
+        const std::string USERID = std::to_string(getUID());
+        return "/run/user/" + USERID + "/hypr";
+    }
 
-    return std::format("{}/hypr", XDG);
+    return std::string{XDG} + "/hypr";
 }
 
 std::vector<SInstanceData> instances() {
@@ -54,7 +55,7 @@ std::vector<SInstanceData> instances() {
         } catch (std::exception& e) { continue; }
 
         // read file
-        std::ifstream ifs(std::format("{}/hyprland.lock", el.path().string()));
+        std::ifstream ifs(el.path().string() + "/hyprland.lock");
 
         int           i = 0;
         for (std::string line; std::getline(ifs, line); ++i) {
@@ -92,7 +93,7 @@ std::string getFromSocket(const std::string& cmd) {
     sockaddr_un serverAddress = {0};
     serverAddress.sun_family  = AF_UNIX;
 
-    std::string socketPath = std::format("{}/{}/.socket.sock", getRuntimeDir(), HIS);
+    std::string socketPath = getRuntimeDir() + "/" + HIS + "/.socket.sock";
 
     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
 

@@ -2,8 +2,10 @@
 #include "../../shared.hpp"
 #include "../../hyprctlCompat.hpp"
 #include <algorithm>
+#include <chrono>
 #include <ranges>
 #include <set>
+#include <thread>
 #include <hyprutils/os/Process.hpp>
 #include <hyprutils/memory/WeakPtr.hpp>
 #include "../shared.hpp"

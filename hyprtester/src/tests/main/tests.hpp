@@ -1,14 +1,9 @@
 #pragma once
-#include "../../shared.hpp"
+#include <map>
 
-#include <memory>
-#include <vector>
+#include "../shared.hpp"
 
-inline std::vector<std::shared_ptr<CTestCase>> mainTestCases;
+inline std::map<const char*, CTestCase&> mainTestCases;
 
-#ifndef INCLUDED_FROM_MAIN
-// What this group of tests is called
-#define TEST_GROUP_NAME "main"
-// Where our group's test cases will be stored
-#define GROUP_TEST_CASE_STORAGE mainTestCases
-#endif // !defined(INCLUDED_FROM_MAIN)
+// Where `TEST_CASE` macros will store generated test cases:
+#define TEST_CASES_STORAGE mainTestCases

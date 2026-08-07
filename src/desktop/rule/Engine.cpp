@@ -33,13 +33,13 @@ void CRuleEngine::cleanExecRules() {
 
 void CRuleEngine::updateAllRules() {
     cleanExecRules();
-    for (const auto& w : Desktop::windowState()->windows()) {
+    for (const auto& w : g_pCompositor->m_windows) {
         if (!validMapped(w) || w->isHidden())
             continue;
 
         w->m_ruleApplicator->propertiesChanged(RULE_PROP_ALL);
     }
-    for (const auto& ls : Desktop::layerState()->layers()) {
+    for (const auto& ls : g_pCompositor->m_layers) {
         if (!validMapped(ls))
             continue;
 

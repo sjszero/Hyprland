@@ -1,7 +1,6 @@
 #include <re2/re2.h>
 
 #include <cctype>
-#include <cerrno>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <cstdio>
@@ -34,15 +33,6 @@ using namespace Hyprutils::Memory;
 #include "Strings.hpp"
 #include "hyprpaper/Hyprpaper.hpp"
 
-#include <readline/readline.h>
-#include <readline/history.h>
-
-#define LUA_ERRSYNTAX 3
-#define LUA_EOFMARK   "<eof>"
-
-#define xstr(a) str(a)
-#define str(a)  #a
-
 std::string instanceSignature;
 bool        quiet = false;
 
@@ -60,24 +50,6 @@ void log(const std::string_view str) {
     std::println("{}", str);
 }
 
-static bool writeAll(const int fd, std::string_view data) {
-    size_t totalWritten = 0;
-    while (totalWritten < data.size()) {
-        const auto written = write(fd, data.data() + totalWritten, data.size() - totalWritten);
-        if (written > 0) {
-            totalWritten += sc<size_t>(written);
-            continue;
-        }
-
-        if (written < 0 && errno == EINTR)
-            continue;
-
-        return false;
-    }
-
-    return true;
-}
-
 static int getUID() {
     const auto UID   = getuid();
     const auto PWUID = getpwuid(UID);
@@ -87,10 +59,12 @@ static int getUID() {
 std::string getRuntimeDir() {
     const auto XDG = getenv("XDG_RUNTIME_DIR");
 
-    if (!XDG)
-        return std::format("/run/user/{}/hypr", getUID());
+    if (!XDG) {
+        const std::string USERID = std::to_string(getUID());
+        return "/run/user/" + USERID + "/hypr";
+    }
 
-    return std::format("{}/hypr", XDG);
+    return std::string{XDG} + "/hypr";
 }
 
 static std::optional<uint64_t> toUInt64(const std::string_view str) {
@@ -202,7 +176,7 @@ int rollingRead(const int socket) {
     return 0;
 }
 
-int request(std::string_view arg, int minArgs = 0, bool needRoll = false, bool isRepl = false) {
+int request(std::string_view arg, int minArgs = 0, bool needRoll = false) {
     const auto SERVERSOCKET = socket(AF_UNIX, SOCK_STREAM, 0);
 
     if (SERVERSOCKET < 0) {
@@ -231,16 +205,18 @@ int request(std::string_view arg, int minArgs = 0, bool needRoll = false, bool i
     sockaddr_un serverAddress = {0};
     serverAddress.sun_family  = AF_UNIX;
 
-    std::string socketPath = std::format("{}/{}/.socket.sock", getRuntimeDir(), instanceSignature);
+    std::string socketPath = getRuntimeDir() + "/" + instanceSignature + "/.socket.sock";
 
     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
 
     if (connect(SERVERSOCKET, rc<sockaddr*>(&serverAddress), SUN_LEN(&serverAddress)) < 0) {
-        log(std::format("Couldn't connect to {}. (4)", socketPath));
+        log("Couldn't connect to " + socketPath + ". (4)");
         return 4;
     }
 
-    if (!writeAll(SERVERSOCKET, arg)) {
+    auto sizeWritten = write(SERVERSOCKET, arg.data(), arg.size());
+
+    if (sizeWritten < 0) {
         log("Couldn't write (5)");
         return 5;
     }
@@ -255,35 +231,26 @@ int request(std::string_view arg, int minArgs = 0, bool needRoll = false, bool i
     // read all data until server closes the connection
     // this handles partial writes on the server side under high load
     while (true) {
-        const auto sizeRead = read(SERVERSOCKET, buffer, BUFFER_SIZE);
+        sizeWritten = read(SERVERSOCKET, buffer, BUFFER_SIZE);
 
-        if (sizeRead < 0) {
-            if (errno == EINTR)
-                continue;
+        if (sizeWritten < 0) {
             if (errno == EWOULDBLOCK)
                 log("Hyprland IPC didn't respond in time\n");
             log("Couldn't read (6)");
             return 6;
         }
 
-        if (sizeRead == 0) {
+        if (sizeWritten == 0) {
             // server closed connection, we're done
             break;
         }
 
-        reply.append(buffer, sc<size_t>(sizeRead));
+        reply += std::string(buffer, sizeWritten);
     }
 
     close(SERVERSOCKET);
 
-    // lua interactive REPL: check for incomplete-line error
-    if (isRepl && reply.starts_with("error: " xstr(LUA_ERRSYNTAX) " ") && reply.ends_with(LUA_EOFMARK))
-        return 8;
-    else
-        log(reply);
-
-    if (reply.starts_with("error:"))
-        return 7;
+    log(reply);
 
     return 0;
 }
@@ -304,38 +271,37 @@ int requestIPC(std::string_view filename, std::string_view arg) {
     sockaddr_un serverAddress = {0};
     serverAddress.sun_family  = AF_UNIX;
 
-    std::string socketPath = std::format("{}/{}/{}", getRuntimeDir(), instanceSignature, filename);
+    std::string socketPath = getRuntimeDir() + "/" + instanceSignature + "/" + std::string(filename);
 
     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
 
     if (connect(SERVERSOCKET, rc<sockaddr*>(&serverAddress), SUN_LEN(&serverAddress)) < 0) {
-        log(std::format("Couldn't connect to {}. (3)", socketPath));
+        log("Couldn't connect to " + socketPath + ". (3)");
         return 3;
     }
 
     arg = arg.substr(arg.find_first_of('/') + 1); // strip flags
     arg = arg.substr(arg.find_first_of(' ') + 1); // strip "hyprpaper"
 
-    if (!writeAll(SERVERSOCKET, arg)) {
+    auto sizeWritten = write(SERVERSOCKET, arg.data(), arg.size());
+
+    if (sizeWritten < 0) {
         log("Couldn't write (4)");
         return 4;
     }
     constexpr size_t BUFFER_SIZE         = 8192;
     char             buffer[BUFFER_SIZE] = {0};
 
-    ssize_t          sizeRead = 0;
-    do {
-        sizeRead = read(SERVERSOCKET, buffer, BUFFER_SIZE);
-    } while (sizeRead < 0 && errno == EINTR);
+    sizeWritten = read(SERVERSOCKET, buffer, BUFFER_SIZE);
 
-    if (sizeRead < 0) {
+    if (sizeWritten < 0) {
         log("Couldn't read (5)");
         return 5;
     }
 
     close(SERVERSOCKET);
 
-    log(std::string(buffer, sc<size_t>(sizeRead)));
+    log(std::string(buffer));
 
     return 0;
 }
@@ -352,7 +318,7 @@ void batchRequest(std::string_view arg, bool json) {
         commands.insert(0, "j/");
     }
 
-    std::string rq = std::format("[[BATCH]]{}", commands);
+    std::string rq = "[[BATCH]]" + commands;
     request(rq);
 }
 
@@ -383,7 +349,7 @@ void instancesRequest(bool json) {
         result += "\n]";
     }
 
-    log(std::format("{}\n", result));
+    log(result + "\n");
 }
 
 std::vector<std::string> splitArgs(int argc, char** argv) {
@@ -475,7 +441,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        fullRequest += std::format("{} ", ARGS[i]);
+        fullRequest += ARGS[i] + " ";
     }
 
     if (fullRequest.empty()) {
@@ -485,7 +451,7 @@ int main(int argc, char** argv) {
 
     fullRequest.pop_back(); // remove trailing space
 
-    fullRequest = std::format("{}/{}", fullArgs, fullRequest);
+    fullRequest = fullArgs + "/" + fullRequest;
 
     // instances is HIS-independent
     if (fullRequest.contains("/instances")) {
@@ -566,36 +532,7 @@ int main(int argc, char** argv) {
         std::println("{}", USAGE);
     else if (fullRequest.contains("/rollinglog") && needRoll)
         exitStatus = request(fullRequest, 0, true);
-    else if (fullRequest.contains("/repl")) {
-        if (ARGS.size() > 1) {
-            // single command with output
-            exitStatus = request(fullRequest, 1);
-        } else {
-            // interactive REPL mode
-            char*       input      = nullptr;
-            bool        continuing = false;
-            std::string line;
-            while ((input = readline(continuing ? ">> " : "> ")) != nullptr) {
-                // extend line if incomplete, replace otherwise
-                if (continuing) {
-                    line.append("\n");
-                    line.append(input);
-                } else
-                    line.assign(input);
-                free(input);
-                if (!line.empty()) {
-                    exitStatus = request(std::format("/repl {}", line), 0, false, true);
-                    // check for incomplete-line error, retry
-                    if (exitStatus == 8)
-                        continuing = true;
-                    else {
-                        continuing = false;
-                        add_history(line.c_str());
-                    }
-                }
-            }
-        }
-    } else {
+    else {
         exitStatus = request(fullRequest);
     }
 

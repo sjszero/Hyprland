@@ -16,7 +16,7 @@ CWLSHMBuffer::CWLSHMBuffer(WP<CWLSHMPoolResource> pool_, uint32_t id, int32_t of
     if UNLIKELY (!pool_)
         return;
 
-    if UNLIKELY (!pool_->m_pool || pool_->m_pool->m_data == MAP_FAILED)
+    if UNLIKELY (!pool_->m_pool->m_data)
         return;
 
     size     = size_;
@@ -63,7 +63,7 @@ Aquamarine::SSHMAttrs CWLSHMBuffer::shm() {
 }
 
 std::tuple<uint8_t*, uint32_t, size_t> CWLSHMBuffer::beginDataPtr(uint32_t flags) {
-    return {sc<uint8_t*>(m_pool->m_data) + m_offset, m_fmt, sc<size_t>(m_stride) * sc<size_t>(size.y)};
+    return {sc<uint8_t*>(m_pool->m_data) + m_offset, m_fmt, m_stride * size.y};
 }
 
 void CWLSHMBuffer::endDataPtr() {
@@ -71,7 +71,7 @@ void CWLSHMBuffer::endDataPtr() {
 }
 
 bool CWLSHMBuffer::good() {
-    return m_resource && m_resource->good() && m_pool && m_pool->m_data != MAP_FAILED;
+    return true;
 }
 
 void CWLSHMBuffer::update(const CRegion& damage) {
@@ -100,22 +100,24 @@ void CSHMPool::resize(size_t size_) {
         LOGM(Log::ERR, "Couldn't mmap {} bytes from fd {} of shm client", m_size, m_fd.get());
 }
 
-static int shmIsSizeValid(CFileDescriptor& fd, int32_t size) {
-    if UNLIKELY (size <= 0)
-        return 0;
-
+static int shmIsSizeValid(CFileDescriptor& fd, size_t size) {
     struct stat st;
     if UNLIKELY (fstat(fd.get(), &st) == -1) {
         LOGM(Log::ERR, "Couldn't get stat for fd {} of shm client", fd.get());
         return 0;
     }
 
-    return sc<size_t>(st.st_size) >= sc<size_t>(size);
+    return sc<size_t>(st.st_size) >= size;
 }
 
 CWLSHMPoolResource::CWLSHMPoolResource(UP<CWlShmPool>&& resource_, CFileDescriptor fd_, size_t size_) : m_resource(std::move(resource_)) {
     if UNLIKELY (!good())
         return;
+
+    if UNLIKELY (!shmIsSizeValid(fd_, size_)) {
+        m_resource->error(-1, "The size of the file is not big enough for the shm pool");
+        return;
+    }
 
     m_pool = makeShared<CSHMPool>(std::move(fd_), size_);
 
@@ -124,11 +126,11 @@ CWLSHMPoolResource::CWLSHMPoolResource(UP<CWlShmPool>&& resource_, CFileDescript
 
     m_resource->setResize([this](CWlShmPool* r, int32_t size_) {
         if UNLIKELY (size_ < sc<int32_t>(m_pool->m_size)) {
-            r->error(WL_SHM_ERROR_INVALID_FD, "Shrinking a shm pool is illegal");
+            r->error(-1, "Shrinking a shm pool is illegal");
             return;
         }
         if UNLIKELY (!shmIsSizeValid(m_pool->m_fd, size_)) {
-            r->error(WL_SHM_ERROR_INVALID_STRIDE, "The pool size is invalid or the file is not big enough for it");
+            r->error(-1, "The size of the file is not big enough for the shm pool");
             return;
         }
 
@@ -136,8 +138,8 @@ CWLSHMPoolResource::CWLSHMPoolResource(UP<CWlShmPool>&& resource_, CFileDescript
     });
 
     m_resource->setCreateBuffer([this](CWlShmPool* r, uint32_t id, int32_t offset, int32_t w, int32_t h, int32_t stride, uint32_t fmt) {
-        if UNLIKELY (!m_pool || m_pool->m_data == MAP_FAILED) {
-            r->error(WL_SHM_ERROR_INVALID_FD, "The provided shm pool failed to allocate properly");
+        if UNLIKELY (!m_pool || !m_pool->m_data) {
+            r->error(-1, "The provided shm pool failed to allocate properly");
             return;
         }
 
@@ -148,11 +150,6 @@ CWLSHMPoolResource::CWLSHMPoolResource(UP<CWlShmPool>&& resource_, CFileDescript
 
         if UNLIKELY (offset < 0 || w <= 0 || h <= 0 || stride <= 0) {
             r->error(WL_SHM_ERROR_INVALID_STRIDE, "Invalid stride, w, h, or offset");
-            return;
-        }
-
-        if UNLIKELY (!NFormatUtils::isShmBufferLayoutValid(NFormatUtils::shmToDRM(fmt), {w, h}, stride, offset, m_pool->m_size)) {
-            r->error(WL_SHM_ERROR_INVALID_STRIDE, "Buffer would exceed pool size or has an invalid stride");
             return;
         }
 
@@ -185,14 +182,7 @@ CWLSHMResource::CWLSHMResource(UP<CWlShm>&& resource_) : m_resource(std::move(re
 
     m_resource->setCreatePool([](CWlShm* r, uint32_t id, int32_t fd, int32_t size) {
         CFileDescriptor poolFd{fd};
-
-        // validate size and backing file before creating the pool resource, so a rejected pool is never added to m_pools
-        if UNLIKELY (!shmIsSizeValid(poolFd, size)) {
-            r->error(WL_SHM_ERROR_INVALID_STRIDE, "The pool size is invalid or the file is not big enough for it");
-            return;
-        }
-
-        const auto& RESOURCE = PROTO::shm->m_pools.emplace_back(makeUnique<CWLSHMPoolResource>(makeUnique<CWlShmPool>(r->client(), r->version(), id), std::move(poolFd), size));
+        const auto&     RESOURCE = PROTO::shm->m_pools.emplace_back(makeUnique<CWLSHMPoolResource>(makeUnique<CWlShmPool>(r->client(), r->version(), id), std::move(poolFd), size));
 
         if UNLIKELY (!RESOURCE->good()) {
             r->noMemory();

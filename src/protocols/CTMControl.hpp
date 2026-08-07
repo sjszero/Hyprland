@@ -8,6 +8,8 @@
 #include <map>
 #include "../helpers/AnimatedVariable.hpp"
 
+class CMonitor;
+
 class CHyprlandCTMControlResource {
   public:
     CHyprlandCTMControlResource(UP<CHyprlandCtmControlManagerV1>&& resource_);

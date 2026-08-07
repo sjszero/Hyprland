@@ -1,0 +1,165 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Thu, 7 Aug 2026 13:00:00 +0800
+Subject: input: bridge Anland consumer input and Android IME text
+
+diff --git a/src/managers/input/InputMethodRelay.cpp b/src/managers/input/InputMethodRelay.cpp
+index 27fd80b..04ec6d0 100644
+--- a/src/managers/input/InputMethodRelay.cpp
++++ b/src/managers/input/InputMethodRelay.cpp
+@@ -131,9 +131,9 @@ void CInputMethodRelay::commitIMEState(CTextInput* pInput) {
+ }
+ 
+ void CInputMethodRelay::onKeyboardFocus(SP<CWLSurfaceResource> pSurface) {
+-    if (m_inputMethod.expired())
+-        return;
+-
++    // Anland: we don't have an external IME (input-method-v2), but we still need
++    // text-input enter/leave to track focusedSurface() so that getFocusedTextInput()
++    // can find the right text-input for consumer text injection.
+     if (pSurface == m_lastKbFocus)
+         return;
+ 
+@@ -150,9 +150,6 @@ void CInputMethodRelay::onKeyboardFocus(SP<CWLSurfaceResource> pSurface) {
+         return;
+ 
+     for (auto const& ti : m_textInputs) {
+-        if (!ti->isV3())
+-            continue;
+-
+         if (ti->client() != pSurface->client())
+             continue;
+ 
+@@ -176,4 +173,4 @@ CInputPopup* CInputMethodRelay::popupFromSurface(const SP<CWLSurfaceResource> su
+     }
+ 
+     return nullptr;
+-}
++}
+\ No newline at end of file
+diff --git a/src/managers/input/TextInput.cpp b/src/managers/input/TextInput.cpp
+index be9a5d2..a51191c 100644
+--- a/src/managers/input/TextInput.cpp
++++ b/src/managers/input/TextInput.cpp
+@@ -50,11 +50,6 @@ void CTextInput::destroy() {
+ void CTextInput::onEnabled(SP<CWLSurfaceResource> surfV1) {
+     Log::logger->log(Log::DEBUG, "TI ENABLE");
+ 
+-    if (g_pInputManager->m_relay.m_inputMethod.expired()) {
+-        // Log::logger->log(Log::WARN,  "Enabling TextInput on no IME!");
+-        return;
+-    }
+-
+     // v1 only, map surface to PTI
+     if (!isV3()) {
+         if (Desktop::focusState()->surface() != surfV1 || !m_v1Input->m_active)
+@@ -63,15 +58,11 @@ void CTextInput::onEnabled(SP<CWLSurfaceResource> surfV1) {
+         enter(surfV1);
+     }
+ 
+-    g_pInputManager->m_relay.activateIME(this);
++    if (!g_pInputManager->m_relay.m_inputMethod.expired())
++        g_pInputManager->m_relay.activateIME(this);
+ }
+ 
+ void CTextInput::onDisabled() {
+-    if (g_pInputManager->m_relay.m_inputMethod.expired()) {
+-        //  Log::logger->log(Log::WARN,  "Disabling TextInput on no IME!");
+-        return;
+-    }
+-
+     if (!isV3())
+         leave();
+ 
+@@ -85,13 +76,11 @@ void CTextInput::onDisabled() {
+     if (!PFOCUSEDTI || PFOCUSEDTI != this)
+         return;
+ 
+-    g_pInputManager->m_relay.deactivateIME(this);
++    if (!g_pInputManager->m_relay.m_inputMethod.expired())
++        g_pInputManager->m_relay.deactivateIME(this);
+ }
+ 
+ void CTextInput::onReset() {
+-    if (g_pInputManager->m_relay.m_inputMethod.expired())
+-        return;
+-
+     if (!focusedSurface())
+         return;
+ 
+@@ -99,22 +88,20 @@ void CTextInput::onReset() {
+     if (!PFOCUSEDTI || PFOCUSEDTI != this)
+         return;
+ 
+-    g_pInputManager->m_relay.deactivateIME(this, false);
+-    g_pInputManager->m_relay.activateIME(this);
++    if (!g_pInputManager->m_relay.m_inputMethod.expired()) {
++        g_pInputManager->m_relay.deactivateIME(this, false);
++        g_pInputManager->m_relay.activateIME(this);
++    }
+ }
+ 
+ void CTextInput::onCommit() {
+-    if (g_pInputManager->m_relay.m_inputMethod.expired()) {
+-        //   Log::logger->log(Log::WARN,  "Committing TextInput on no IME!");
+-        return;
+-    }
+-
+     if (!(isV3() ? m_v3Input->m_current.enabled.value : m_v1Input->m_active)) {
+         Log::logger->log(Log::WARN, "Disabled TextInput commit?");
+         return;
+     }
+ 
+-    g_pInputManager->m_relay.commitIMEState(this);
++    if (!g_pInputManager->m_relay.m_inputMethod.expired())
++        g_pInputManager->m_relay.commitIMEState(this);
+ }
+ 
+ void CTextInput::setFocusedSurface(SP<CWLSurfaceResource> pSurface) {
+@@ -307,3 +294,24 @@ CBox CTextInput::cursorBox() {
+ bool CTextInput::isEnabled() {
+     return isV3() ? m_v3Input->m_current.enabled.value : true;
+ }
++
++void CTextInput::commitStringFromConsumer(const std::string& text) {
++    if (text.empty())
++        return;
++    fprintf(stderr, "anland: commitStringFromConsumer isV3=%d text='%s'\n", (int)isV3(), text.c_str());
++    if (isV3()) {
++        const auto V3 = m_v3Input.lock();
++        if (V3) {
++            fprintf(stderr, "anland: commitStringFromConsumer V3 commitString\n");
++            V3->commitString(text);
++        } else
++            fprintf(stderr, "anland: commitStringFromConsumer V3 lock FAILED\n");
++    } else {
++        const auto V1 = m_v1Input.lock();
++        if (V1 && V1->m_active) {
++            fprintf(stderr, "anland: commitStringFromConsumer V1 commitString serial=%u\n", V1->m_serial);
++            V1->commitString(V1->m_serial, text.c_str());
++        } else
++            fprintf(stderr, "anland: commitStringFromConsumer V1 lock=%d active=%d\n", (bool)V1, V1 ? (int)V1->m_active : -1);
++    }
++}
+\ No newline at end of file
+diff --git a/src/managers/input/TextInput.hpp b/src/managers/input/TextInput.hpp
+index 798f31e..a0d6866 100644
+--- a/src/managers/input/TextInput.hpp
++++ b/src/managers/input/TextInput.hpp
+@@ -32,6 +32,10 @@ class CTextInput {
+     bool                   isEnabled();
+     bool                   hasCursorRectangle();
+     CBox                   cursorBox();
++    /* Inject text from the Android soft keyboard (consumer IME path).
++     * Directly writes to the client's text-input protocol, bypassing
++     * the external IME relay (Android keyboard IS the IME here). */
++    void                   commitStringFromConsumer(const std::string& text);
+ 
+     SP<CWLSurfaceResource> focusedSurface();
+ 
+@@ -55,4 +59,4 @@ class CTextInput {
+         CHyprSignalListener surfaceUnmap;
+         CHyprSignalListener surfaceDestroy;
+     } m_listeners;
+-};
++};
+\ No newline at end of file

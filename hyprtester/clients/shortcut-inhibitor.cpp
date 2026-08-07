@@ -3,7 +3,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <print>
-#include <utility>
 
 #include <wayland-client.h>
 #include <wayland.hpp>
@@ -53,7 +52,7 @@ static bool debug, started, shouldExit;
 template <typename... Args>
 //NOLINTNEXTLINE
 static void clientLog(std::format_string<Args...> fmt, Args&&... args) {
-    std::string text = std::format(fmt, std::forward<Args>(args)...);
+    std::string text = std::vformat(fmt.get(), std::make_format_args(args...));
     std::println("{}", text);
     std::fflush(stdout);
 }
@@ -61,7 +60,7 @@ static void clientLog(std::format_string<Args...> fmt, Args&&... args) {
 template <typename... Args>
 //NOLINTNEXTLINE
 static void debugLog(std::format_string<Args...> fmt, Args&&... args) {
-    std::string text = std::format(fmt, std::forward<Args>(args)...);
+    std::string text = std::vformat(fmt.get(), std::make_format_args(args...));
     if (!debug)
         return;
     std::println("{}", text);

@@ -27,6 +27,7 @@ enum eDecorationFlags : uint8_t {
     DECORATION_NON_SOLID           = 1 << 2, /* this decoration is not solid. Other decorations should draw on top of it. Example: shadow */
 };
 
+class CMonitor;
 class CDecorationPositioner;
 
 class IHyprWindowDecoration {

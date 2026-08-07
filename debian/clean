@@ -1,0 +1,11 @@
+example/hyprland.desktop
+hyprctl/hw-protocols/*.cpp
+hyprctl/hw-protocols/*.hpp
+protocols/*.cpp
+protocols/*.hpp
+src/config/defaultConfigBytes.hpp
+src/render/shaders/*.inc
+src/render/shaders/Shaders.hpp
+src/version.h
+debian/dumpabiver
+debian/debian-abi-helper

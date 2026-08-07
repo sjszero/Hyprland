@@ -4,6 +4,7 @@
 #include "WaylandProtocol.hpp"
 #include <optional>
 
+class CMonitor;
 class CXDGOutputProtocol;
 class CWLOutputProtocol;
 

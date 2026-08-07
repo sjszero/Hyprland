@@ -20,7 +20,7 @@ std::vector<SP<IView>> View::getViewsForWorkspace(PHLWORKSPACE ws) {
     if (!ws)
         return views;
 
-    for (const auto& w : Desktop::windowState()->windows()) {
+    for (const auto& w : g_pCompositor->m_windows) {
         if (!w->aliveAndVisible() || w->m_workspace != ws)
             continue;
 
@@ -50,7 +50,7 @@ std::vector<SP<IView>> View::getViewsForWorkspace(PHLWORKSPACE ws) {
         }
     }
 
-    for (const auto& l : Desktop::layerState()->layers()) {
+    for (const auto& l : g_pCompositor->m_layers) {
         if (!l->aliveAndVisible() || l->m_monitor != ws->m_monitor)
             continue;
 
@@ -67,12 +67,7 @@ std::vector<SP<IView>> View::getViewsForWorkspace(PHLWORKSPACE ws) {
             nullptr);
     }
 
-    for (const auto& vr : Desktop::otherViewState()->views()) {
-        const auto v = vr.lock();
-
-        if (!v)
-            continue;
-
+    for (const auto& v : g_pCompositor->m_otherViews) {
         if (!v->aliveAndVisible() || !v->desktopComponent())
             continue;
 

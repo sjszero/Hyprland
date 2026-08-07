@@ -2,13 +2,14 @@
 
 #include "LuaConfigValue.hpp"
 
+#include <optional>
 #include <functional>
 #include <expected>
 
 namespace Config::Lua {
     class CLuaConfigVec2 : public ILuaConfigValue {
       public:
-        CLuaConfigVec2(Config::VEC2 def, std::function<std::expected<void, std::string>(const Config::VEC2&)>&& validator = {});
+        CLuaConfigVec2(Config::VEC2 def, std::optional<std::function<std::expected<void, std::string>(const Config::VEC2&)>>&& validator = std::nullopt);
         virtual ~CLuaConfigVec2() = default;
 
         virtual SParseError           parse(lua_State* s);
@@ -22,8 +23,8 @@ namespace Config::Lua {
         const Config::VEC2&           parsed();
 
       private:
-        Config::VEC2                                                         m_default = {};
-        Config::VEC2                                                         m_data    = {};
-        std::function<std::expected<void, std::string>(const Config::VEC2&)> m_validator;
+        Config::VEC2                                                                        m_default = {};
+        Config::VEC2                                                                        m_data    = {};
+        std::optional<std::function<std::expected<void, std::string>(const Config::VEC2&)>> m_validator;
     };
 };

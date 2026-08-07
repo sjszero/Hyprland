@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_clean:
+	find protocols -name '*.cpp' -exec rm -rf {} \;
+	find protocols -name '*.hpp' -exec rm -rf {} \;
+	dh_clean
+
+override_dh_auto_test:
+	:
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+	-DCMAKE_LIBRARY_PATH=$(DEB_HOST_MULTIARCH)

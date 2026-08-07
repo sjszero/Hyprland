@@ -1,52 +1,38 @@
 #include "LuaKeybind.hpp"
 
+#include <optional>
 #include <string_view>
 
 using namespace Config::Lua;
 
 static constexpr const char* MT = "HL.Keybind";
 
-static Keybinds::PBind       getKeybindFromUserdata(lua_State* L) {
-    auto* ref = sc<WP<Keybinds::CBind>*>(luaL_checkudata(L, 1, MT));
-    return ref->lock();
-}
+namespace {
+    std::optional<SP<SKeybind>> getKeybindFromUserdata(lua_State* L) {
+        auto* ref = sc<WP<SKeybind>*>(luaL_checkudata(L, 1, MT));
+        return ref->lock();
+    }
 
-static void pushDeviceList(lua_State* L, const Keybinds::CBind& keybind) {
-    lua_newtable(L);
-    int i = 1;
-    for (const auto& device : keybind.devices()) {
-        lua_pushstring(L, device.c_str());
-        lua_rawseti(L, -2, i++);
+    void pushDeviceList(lua_State* L, const SKeybind& keybind) {
+        lua_newtable(L);
+        int i = 1;
+        for (const auto& device : keybind.devices) {
+            lua_pushstring(L, device.c_str());
+            lua_rawseti(L, -2, i++);
+        }
     }
 }
 
-static std::string_view keyName(const Keybinds::CBind& keybind) {
-    const auto KEYS      = keybind.keys();
-    const auto KEY_NAMES = keybind.keyNames();
-    if (keybind.hasFlag(Keybinds::BIND_FLAG_CATCH_ALL) || KEYS.empty() || KEYS.back().keycode() || KEY_NAMES.empty())
-        return {};
-
-    return KEY_NAMES.back();
-}
-
-static xkb_keycode_t keycode(const Keybinds::CBind& keybind) {
-    const auto KEYS = keybind.keys();
-    if (KEYS.empty())
-        return 0;
-
-    return KEYS.back().keycode().value_or(0);
-}
-
 static int keybindEq(lua_State* L) {
-    const auto* lhs = sc<WP<Keybinds::CBind>*>(luaL_checkudata(L, 1, MT));
-    const auto* rhs = sc<WP<Keybinds::CBind>*>(luaL_checkudata(L, 2, MT));
+    const auto* lhs = sc<WP<SKeybind>*>(luaL_checkudata(L, 1, MT));
+    const auto* rhs = sc<WP<SKeybind>*>(luaL_checkudata(L, 2, MT));
 
     lua_pushboolean(L, lhs->lock() == rhs->lock());
     return 1;
 }
 
 static int keybindToString(lua_State* L) {
-    const auto* ref     = sc<WP<Keybinds::CBind>*>(luaL_checkudata(L, 1, MT));
+    const auto* ref     = sc<WP<SKeybind>*>(luaL_checkudata(L, 1, MT));
     const auto  keybind = ref->lock();
 
     if (!keybind)
@@ -64,7 +50,7 @@ static int keybindSetEnabled(lua_State* L) {
     if (!keybind)
         return 0;
 
-    keybind->setEnabled(lua_toboolean(L, 2));
+    (*keybind)->enabled = lua_toboolean(L, 2);
     return 0;
 }
 
@@ -75,16 +61,28 @@ static int keybindIsEnabled(lua_State* L) {
         return 1;
     }
 
-    lua_pushboolean(L, keybind->enabled());
+    lua_pushboolean(L, (*keybind)->enabled);
     return 1;
 }
 
 static int keybindRemove(lua_State* L) {
     const auto keybind = getKeybindFromUserdata(L);
-    if (!keybind || !Keybinds::mgr())
+    if (!keybind || !g_pKeybindManager)
         return 0;
 
-    Keybinds::mgr()->removeBind(keybind);
+    if ((*keybind)->handler == "__lua") {
+        try {
+            const int ref = std::stoi((*keybind)->arg);
+            if (ref > 0)
+                luaL_unref(L, LUA_REGISTRYINDEX, ref);
+        } catch (...) {
+            // invalid ref, ignore
+        }
+
+        (*keybind)->arg = std::to_string(LUA_NOREF);
+    }
+
+    g_pKeybindManager->removeKeybind((*keybind)->modmask, SParsedKey{.key = (*keybind)->key, .keycode = (*keybind)->keycode, .catchAll = (*keybind)->catchAll});
     return 0;
 }
 
@@ -95,11 +93,10 @@ static int keybindGetDescription(lua_State* L) {
         return 1;
     }
 
-    const auto& DESCRIPTION = keybind->metadata().description;
-    if (!DESCRIPTION)
+    if (!(*keybind)->hasDescription)
         lua_pushnil(L);
     else
-        lua_pushstring(L, DESCRIPTION->c_str());
+        lua_pushstring(L, (*keybind)->description.c_str());
 
     return 1;
 }
@@ -117,63 +114,57 @@ static int keybindIndex(lua_State* L) {
     else if (!keybind)
         lua_pushnil(L);
     else if (key == "enabled")
-        lua_pushboolean(L, keybind->enabled());
+        lua_pushboolean(L, (*keybind)->enabled);
     else if (key == "has_description")
-        lua_pushboolean(L, keybind->metadata().description.has_value());
+        lua_pushboolean(L, (*keybind)->hasDescription);
     else if (key == "description")
         return keybindGetDescription(L);
     else if (key == "display_key")
-        lua_pushstring(L, keybind->metadata().displayKey.c_str());
+        lua_pushstring(L, (*keybind)->displayKey.c_str());
     else if (key == "submap")
-        lua_pushstring(L, keybind->metadata().submap.c_str());
+        lua_pushstring(L, (*keybind)->submap.name.c_str());
     else if (key == "handler")
-        lua_pushstring(L, keybind->metadata().handler.c_str());
+        lua_pushstring(L, (*keybind)->handler.c_str());
     else if (key == "arg")
-        lua_pushstring(L, keybind->metadata().argument.c_str());
+        lua_pushstring(L, (*keybind)->arg.c_str());
     else if (key == "modmask")
-        lua_pushinteger(L, sc<lua_Integer>(keybind->modifierMask()));
-    else if (key == "key") {
-        const auto KEY_NAME = keyName(*keybind);
-        if (KEY_NAME.empty())
-            lua_pushliteral(L, "");
-        else
-            lua_pushlstring(L, KEY_NAME.data(), KEY_NAME.size());
-    } else if (key == "keycode")
-        lua_pushinteger(L, sc<lua_Integer>(keycode(*keybind)));
+        lua_pushinteger(L, sc<lua_Integer>((*keybind)->modmask));
+    else if (key == "key")
+        lua_pushstring(L, (*keybind)->key.c_str());
+    else if (key == "keycode")
+        lua_pushinteger(L, sc<lua_Integer>((*keybind)->keycode));
     else if (key == "catchall")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_CATCH_ALL));
+        lua_pushboolean(L, (*keybind)->catchAll);
     else if (key == "repeating")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_REPEAT));
+        lua_pushboolean(L, (*keybind)->repeat);
     else if (key == "locked")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_LOCKED));
+        lua_pushboolean(L, (*keybind)->locked);
     else if (key == "release")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_RELEASE));
+        lua_pushboolean(L, (*keybind)->release);
     else if (key == "non_consuming")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_NON_CONSUMING));
+        lua_pushboolean(L, (*keybind)->nonConsuming);
     else if (key == "auto_consuming")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_AUTO_CONSUMING));
+        lua_pushboolean(L, (*keybind)->autoConsuming);
     else if (key == "transparent")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_TRANSPARENT));
+        lua_pushboolean(L, (*keybind)->transparent);
     else if (key == "ignore_mods")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_IGNORE_MODS));
+        lua_pushboolean(L, (*keybind)->ignoreMods);
     else if (key == "long_press")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_LONG_PRESS));
+        lua_pushboolean(L, (*keybind)->longPress);
     else if (key == "dont_inhibit")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_DONT_INHIBIT));
+        lua_pushboolean(L, (*keybind)->dontInhibit);
     else if (key == "click")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_CLICK));
+        lua_pushboolean(L, (*keybind)->click);
     else if (key == "drag")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_DRAG));
+        lua_pushboolean(L, (*keybind)->drag);
     else if (key == "submap_universal")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_SUBMAP_UNIVERSAL));
+        lua_pushboolean(L, (*keybind)->submapUniversal);
     else if (key == "mouse")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_MOUSE));
+        lua_pushboolean(L, (*keybind)->mouse);
     else if (key == "device_inclusive")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_DEVICE_INCLUSIVE));
+        lua_pushboolean(L, (*keybind)->deviceInclusive);
     else if (key == "devices")
-        pushDeviceList(L, *keybind);
-    else if (key == "allow_input_capture")
-        lua_pushboolean(L, keybind->hasFlag(Keybinds::BIND_FLAG_ALLOW_INPUT_CAPTURE));
+        pushDeviceList(L, **keybind);
     else
         lua_pushnil(L);
 
@@ -181,11 +172,11 @@ static int keybindIndex(lua_State* L) {
 }
 
 void Objects::CLuaKeybind::setup(lua_State* L) {
-    registerMetatable(L, MT, keybindIndex, gcRef<WP<Keybinds::CBind>>, keybindEq, keybindToString);
+    registerMetatable(L, MT, keybindIndex, gcRef<WP<SKeybind>>, keybindEq, keybindToString);
 }
 
-void Objects::CLuaKeybind::push(lua_State* L, const Keybinds::PBind& keybind) {
-    new (lua_newuserdata(L, sizeof(WP<Keybinds::CBind>))) WP<Keybinds::CBind>(keybind);
+void Objects::CLuaKeybind::push(lua_State* L, const SP<SKeybind>& keybind) {
+    new (lua_newuserdata(L, sizeof(WP<SKeybind>))) WP<SKeybind>(keybind);
     luaL_getmetatable(L, MT);
     lua_setmetatable(L, -2);
 }

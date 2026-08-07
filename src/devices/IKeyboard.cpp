@@ -1,11 +1,10 @@
 #include "IKeyboard.hpp"
 #include "../defines.hpp"
-#include "../config/ConfigManager.hpp"
+#include "../config/legacy/ConfigManager.hpp"
 #include "../managers/input/InputManager.hpp"
 #include "../managers/SeatManager.hpp"
 #include "../helpers/MiscFunctions.hpp"
 #include "../errorOverlay/Overlay.hpp"
-#include "../keybinds/Key.hpp"
 #include <sys/mman.h>
 #include <aquamarine/input/Input.hpp>
 #include <hyprutils/string/VarList.hpp>
@@ -100,8 +99,8 @@ void IKeyboard::setKeymap(const SStringRuleNames& rules) {
         m_xkbKeymap = xkb_keymap_new_from_names2(CONTEXT, &XKBRULES, XKB_KEYMAP_FORMAT_TEXT_V2, XKB_KEYMAP_COMPILE_NO_FLAGS);
 
     if (!m_xkbKeymap) {
-        ErrorOverlay::overlay()->queueError(std::format("Invalid keyboard layout passed. ( rules: {}, model: {}, variant: {}, options: {}, layout: {} )", rules.rules, rules.model,
-                                                        rules.variant, rules.options, rules.layout));
+        ErrorOverlay::overlay()->queueError("Invalid keyboard layout passed. ( rules: " + rules.rules + ", model: " + rules.model + ", variant: " + rules.variant +
+                                            ", options: " + rules.options + ", layout: " + rules.layout + " )");
 
         Log::logger->log(Log::ERR, "Keyboard layout {} with variant {} (rules: {}, model: {}, options: {}) couldn't have been loaded.", rules.layout, rules.variant, rules.rules,
                          rules.model, rules.options);
@@ -188,9 +187,6 @@ void IKeyboard::updateKeymapFD() {
             memcpy(keymapV1FDDest, m_xkbKeymapV1String.c_str(), m_xkbKeymapV1String.length());
             munmap(keymapV1FDDest, m_xkbKeymapV1String.length() + 1);
             m_xkbKeymapV1FD = std::move(roV1);
-
-            m_xkbKeymapFD.setFlags(m_xkbKeymapFD.getFlags() | FD_CLOEXEC);
-            m_xkbKeymapV1FD.setFlags(m_xkbKeymapV1FD.getFlags() | FD_CLOEXEC);
         }
     }
 
@@ -357,36 +353,20 @@ void IKeyboard::updateLEDs(uint32_t leds) {
     aq()->updateLEDs(leds);
 }
 
-Input::ModifierMask IKeyboard::getModifiers() {
-    uint32_t modMask     = m_modifiersState.depressed | m_modifiersState.latched;
-    auto     getModState = [this, xkb = &modMask](const char* xkbModName) -> bool {
-        auto IDX = xkb_keymap_mod_get_index(m_xkbKeymap, xkbModName);
+uint32_t IKeyboard::getModifiers() {
+    uint32_t modMask = m_modifiersState.depressed | m_modifiersState.latched;
+    uint32_t mods    = 0;
+    for (size_t i = 0; i < m_modIndexes.size(); ++i) {
+        if (m_modIndexes[i] == XKB_MOD_INVALID)
+            continue;
 
-        if (IDX == XKB_MOD_INVALID)
-            return false;
+        if (!(modMask & (1 << m_modIndexes[i])))
+            continue;
 
-        return (*xkb & (sc<uint32_t>(1) << IDX)) > 0;
-    };
+        mods |= (1 << i);
+    }
 
-    Input::ModifierMask hl = Input::HL_MODIFIER_NONE;
-    if (getModState(XKB_MOD_NAME_ALT))
-        hl |= Input::HL_MODIFIER_ALT;
-    if (getModState(XKB_MOD_NAME_CTRL))
-        hl |= Input::HL_MODIFIER_CTRL;
-    if (getModState(XKB_MOD_NAME_SHIFT))
-        hl |= Input::HL_MODIFIER_SHIFT;
-    if (getModState(XKB_MOD_NAME_CAPS))
-        hl |= Input::HL_MODIFIER_CAPS;
-    if (getModState(XKB_MOD_NAME_MOD2))
-        hl |= Input::HL_MODIFIER_MOD2;
-    if (getModState(XKB_MOD_NAME_MOD3))
-        hl |= Input::HL_MODIFIER_MOD3;
-    if (getModState(XKB_MOD_NAME_MOD4))
-        hl |= Input::HL_MODIFIER_META;
-    if (getModState(XKB_MOD_NAME_MOD5))
-        hl |= Input::HL_MODIFIER_MOD5;
-
-    return hl;
+    return mods;
 }
 
 void IKeyboard::updateModifiers(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {

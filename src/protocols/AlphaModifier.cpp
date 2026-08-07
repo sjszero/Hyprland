@@ -28,7 +28,6 @@ void CAlphaModifier::setResource(UP<CWpAlphaModifierSurfaceV1>&& resource) {
         }
 
         m_alpha = alpha / sc<float>(UINT32_MAX);
-        markPending();
     });
 
     m_listeners.surfaceCommitted = m_surface->m_events.commit.listen([this] {
@@ -55,15 +54,9 @@ void CAlphaModifier::setResource(UP<CWpAlphaModifierSurfaceV1>&& resource) {
 void CAlphaModifier::destroy() {
     m_resource.reset();
     m_alpha = 1.F;
-    markPending();
 
     if (!m_surface)
         PROTO::alphaModifier->destroyAlphaModifier(this);
-}
-
-void CAlphaModifier::markPending() {
-    if (m_surface)
-        m_surface->m_pending.updated.bits.alphaModifier = true;
 }
 
 CAlphaModifierProtocol::CAlphaModifierProtocol(const wl_interface* iface, const int& ver, const std::string& name) : IWaylandProtocol(iface, ver, name) {

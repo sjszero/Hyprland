@@ -11,6 +11,8 @@
 #include <hyprutils/string/VarList2.hpp>
 using namespace Hyprutils::String;
 
+using namespace std::string_literals;
+
 constexpr const char*          SOCKET_NAME = ".hyprpaper.sock";
 static SP<CCHyprpaperCoreImpl> g_coreImpl;
 
@@ -46,7 +48,7 @@ static std::expected<std::string, std::string> getFullPath(const std::string_vie
         if (!HOME || HOME[0] == '\0')
             return std::unexpected("home path but no $HOME");
 
-        return resolvePath(std::format("{}/{}", HOME, sv.substr(1)));
+        return resolvePath(std::string{HOME} + "/"s + std::string{sv.substr(1)});
     }
 
     return resolvePath(sv);
@@ -77,7 +79,7 @@ static std::expected<void, std::string> doWallpaper(const std::string_view& RHS)
     if (!PATH)
         return std::unexpected(std::format("bad path: {}", PATH_RAW));
 
-    auto socketPath = std::format("{}/hypr/{}/{}", RTDIR, HIS, SOCKET_NAME);
+    auto socketPath = RTDIR + "/hypr/"s + HIS + "/"s + SOCKET_NAME;
 
     auto socket = Hyprwire::IClientSocket::open(socketPath);
 
@@ -147,7 +149,7 @@ static std::expected<void, std::string> doListActive() {
     if (!HIS || HIS[0] == '\0')
         return std::unexpected("can't send: no HYPRLAND_INSTANCE_SIGNATURE (not running under hyprland)");
 
-    auto socketPath = std::format("{}/hypr/{}/{}", RTDIR, HIS, SOCKET_NAME);
+    auto socketPath = RTDIR + "/hypr/"s + HIS + "/"s + SOCKET_NAME;
 
     auto socket = Hyprwire::IClientSocket::open(socketPath);
 

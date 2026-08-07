@@ -19,10 +19,8 @@ CGLRenderbuffer::~CGLRenderbuffer() {
 
     g_pHyprOpenGL->makeEGLCurrent();
 
-    if (m_framebuffer) {
-        unbind();
-        m_framebuffer->release();
-    }
+    unbind();
+    m_framebuffer->release();
 
     if (m_rbo)
         glDeleteRenderbuffers(1, &m_rbo);

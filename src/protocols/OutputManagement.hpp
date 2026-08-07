@@ -8,6 +8,8 @@
 #include "../helpers/signal/Signal.hpp"
 #include <aquamarine/output/Output.hpp>
 
+class CMonitor;
+
 class COutputHead;
 class COutputMode;
 

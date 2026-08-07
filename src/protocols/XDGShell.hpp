@@ -16,7 +16,6 @@ class CXDGSurfaceResource;
 class CXDGToplevelResource;
 class CXDGPopupResource;
 class CSeatGrab;
-class CWLSeatResource;
 class CWLSurfaceResource;
 class CXDGDialogV1Resource;
 struct SEventLoopDoLaterLock;
@@ -43,17 +42,6 @@ class CXDGPositionerRules {
 
   private:
     SXDGPositionerState m_state;
-};
-
-struct SXDGToplevelMoveRequest {
-    SP<CWLSeatResource> seat;
-    uint32_t            serial = 0;
-};
-
-struct SXDGToplevelResizeRequest {
-    SP<CWLSeatResource>   seat;
-    uint32_t              serial = 0;
-    xdgToplevelResizeEdge edges  = XDG_TOPLEVEL_RESIZE_EDGE_NONE;
 };
 
 class CXDGPopupResource {
@@ -118,19 +106,16 @@ class CXDGToplevelResource {
     uint32_t setMaximized(bool maximized);
     uint32_t setFullscreen(bool fullscreen);
     uint32_t setActive(bool active);
-    uint32_t setResizing(bool resizing);
     uint32_t setSuspeneded(bool sus);
     void     setNewParent(SP<CXDGToplevelResource> newParent);
 
     void     close();
 
     struct {
-        CSignalT<>                          sizeLimitsChanged;
-        CSignalT<>                          stateChanged;    // maximized, fs, minimized, etc.
-        CSignalT<>                          metadataChanged; // title, appid
-        CSignalT<SXDGToplevelMoveRequest>   requestMove;
-        CSignalT<SXDGToplevelResizeRequest> requestResize;
-        CSignalT<>                          destroy; // only the role
+        CSignalT<> sizeLimitsChanged;
+        CSignalT<> stateChanged;    // maximized, fs, minimized, etc.
+        CSignalT<> metadataChanged; // title, appid
+        CSignalT<> destroy;         // only the role
     } m_events;
 
     struct {

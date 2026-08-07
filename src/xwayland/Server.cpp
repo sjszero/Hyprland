@@ -24,7 +24,7 @@
 #include "debug/log/Logger.hpp"
 #include "../defines.hpp"
 #include "../Compositor.hpp"
-#include "../pointer/cursor/CursorManager.hpp"
+#include "../managers/CursorManager.hpp"
 using namespace Hyprutils::OS;
 
 // Constants
@@ -423,7 +423,7 @@ int CXWaylandServer::ready(int fd, uint32_t mask) {
     if (!g_pXWayland->m_wm)
         g_pXWayland->m_wm = makeUnique<CXWM>();
 
-    Pointer::Cursor::mgr()->setXWaylandCursor();
+    g_pCursorManager->setXWaylandCursor();
 
     return 0;
 }

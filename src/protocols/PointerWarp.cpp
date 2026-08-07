@@ -3,11 +3,9 @@
 #include "core/Seat.hpp"
 #include "../desktop/view/WLSurface.hpp"
 #include "../managers/SeatManager.hpp"
-#include "../pointer/PointerManager.hpp"
+#include "../managers/PointerManager.hpp"
 #include "../desktop/view/Window.hpp"
-#include "desktop/view/LayerSurface.hpp"
-#include <hyprutils/math/Box.hpp>
-#include <hyprutils/math/Vector2D.hpp>
+#include "../desktop/view/LayerSurface.hpp"
 
 CPointerWarpProtocol::CPointerWarpProtocol(const wl_interface* iface, const int& ver, const std::string& name) : IWaylandProtocol(iface, ver, name) {
     ;
@@ -30,8 +28,6 @@ void CPointerWarpProtocol::bindManager(wl_client* client, void* data, uint32_t v
         if (g_pSeatManager->m_state.pointerFocus != PSURFACE)
             return;
 
-        CBox surfbox;
-
         auto HLSURF = Desktop::View::CWLSurface::fromResource(PSURFACE);
 
         if (!HLSURF)
@@ -39,6 +35,7 @@ void CPointerWarpProtocol::bindManager(wl_client* client, void* data, uint32_t v
 
         auto VIEW   = HLSURF->view();
         auto WINDOW = Desktop::View::CWindow::fromView(VIEW);
+        CBox surfbox;
         if (WINDOW)
             surfbox = WINDOW->getWindowMainSurfaceBox();
         else {
@@ -61,21 +58,14 @@ void CPointerWarpProtocol::bindManager(wl_client* client, void* data, uint32_t v
         if (!surfbox.containsPoint(GLOBALPOS))
             return;
 
-        const auto POINTER = CWLPointerResource::fromResource(pointer);
-        if UNLIKELY (!POINTER) {
-            LOGM(Log::ERR, "pointer_warp received an invalid pointer resource");
-            return;
-        }
-
-        const auto PSEAT = POINTER->m_owner.lock();
+        const auto PSEAT = CWLPointerResource::fromResource(pointer)->m_owner.lock();
         if (!g_pSeatManager->serialValid(PSEAT, serial, false))
             return;
 
         LOGM(Log::DEBUG, "warped pointer to {}", GLOBALPOS);
 
-        Pointer::mgr()->warpTo(GLOBALPOS);
+        g_pPointerManager->warpTo(GLOBALPOS);
         g_pSeatManager->sendPointerMotion(Time::millis(Time::steadyNow()), LOCALPOS);
-        g_pSeatManager->sendPointerFrame();
     });
 }
 

@@ -144,8 +144,6 @@ class CWLSeatResource {
     CWLSeatResource(SP<CWlSeat> resource_);
     ~CWLSeatResource();
 
-    static SP<CWLSeatResource>           fromResource(wl_resource*);
-
     void                                 sendCapabilities(uint32_t caps); // uses IHID capabilities
 
     bool                                 good();

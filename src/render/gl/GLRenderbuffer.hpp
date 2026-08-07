@@ -4,6 +4,8 @@
 #include "../Renderbuffer.hpp"
 #include <aquamarine/buffer/Buffer.hpp>
 
+class CMonitor;
+
 namespace Render::GL {
     class CGLRenderbuffer : public IRenderbuffer {
       public:

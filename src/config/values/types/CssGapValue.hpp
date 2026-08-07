@@ -9,10 +9,9 @@
 
 namespace Config::Values {
     struct SCssGapValueOptions {
-        std::optional<int64_t>         min               = std::nullopt;
-        std::optional<int64_t>         max               = std::nullopt;
-        Supplementary::PropRefreshBits refresh           = 0;
-        const char*                    deprecationNotice = nullptr;
+        std::optional<int64_t>         min     = std::nullopt;
+        std::optional<int64_t>         max     = std::nullopt;
+        Supplementary::PropRefreshBits refresh = 0;
     };
 
     class CCssGapValue : public IValue {

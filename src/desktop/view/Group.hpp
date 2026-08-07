@@ -3,7 +3,6 @@
 #include "../DesktopTypes.hpp"
 #include "../../helpers/math/Direction.hpp"
 
-#include <optional>
 #include <vector>
 
 namespace Layout {
@@ -23,7 +22,7 @@ namespace Desktop::View {
 
         bool                             has(PHLWINDOW w) const;
 
-        void                             add(PHLWINDOW w, std::optional<size_t> index = {});
+        void                             add(PHLWINDOW w);
         void                             remove(PHLWINDOW w, Math::eDirection dir = Math::DIRECTION_DEFAULT, eRemoveFromGroupReason reason = REMOVE_FROM_GROUP_REASON_UNKNOWN);
         void                             moveCurrent(bool next);
         void                             setCurrent(size_t idx);

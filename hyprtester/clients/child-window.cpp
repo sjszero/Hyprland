@@ -12,8 +12,6 @@
 #include <hyprutils/memory/SharedPtr.hpp>
 #include <hyprutils/math/Vector2D.hpp>
 
-#include <utility>
-
 using Hyprutils::Math::Vector2D;
 using namespace Hyprutils::Memory;
 
@@ -51,7 +49,7 @@ bool debug, shouldExit, started;
 template <typename... Args>
 //NOLINTNEXTLINE
 static void clientLog(std::format_string<Args...> fmt, Args&&... args) {
-    std::string text = std::format(fmt, std::forward<Args>(args)...);
+    std::string text = std::vformat(fmt.get(), std::make_format_args(args...));
     std::println("{}", text);
     std::fflush(stdout);
 }
@@ -59,7 +57,7 @@ static void clientLog(std::format_string<Args...> fmt, Args&&... args) {
 template <typename... Args>
 //NOLINTNEXTLINE
 static void debugLog(std::format_string<Args...> fmt, Args&&... args) {
-    std::string text = std::format(fmt, std::forward<Args>(args)...);
+    std::string text = std::vformat(fmt.get(), std::make_format_args(args...));
     if (!debug)
         return;
     std::println("{}", text);

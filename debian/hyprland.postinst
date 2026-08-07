@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -eu -o pipefail
+
+case "$1" in
+    configure)
+        if command -v setcap >/dev/null 2>&1; then
+            setcap 'cap_sys_nice=ep' /usr/bin/Hyprland || echo "Failed to grant cap_sys_nice to Hyprland"
+        fi
+    ;;
+esac
+
+#DEBHELPER#

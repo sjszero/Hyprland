@@ -25,15 +25,12 @@ using namespace Hyprutils::OS;
 using namespace std::string_literals;
 
 //
-void CHyprlandInstance::runHyprlandThread(bool safeMode, bool lockedCrash) {
+void CHyprlandInstance::runHyprlandThread(bool safeMode) {
     std::vector<std::string> argsStd;
     argsStd.emplace_back("--watchdog-fd");
     argsStd.emplace_back(std::format("{}", m_toHlPid.get()));
     if (safeMode)
         argsStd.emplace_back("--safe-mode");
-
-    if (lockedCrash)
-        argsStd.emplace_back("--locked");
 
     for (const auto& a : g_state->rawArgvNoBinPath) {
         argsStd.emplace_back(a);
@@ -137,22 +134,10 @@ void CHyprlandInstance::dispatchHyprlandEvent() {
             m_hyprlandExiting = true;
             continue;
         }
-
-        if (sv == "lock") {
-            // session locked
-            m_hyprlandLocked = true;
-            continue;
-        }
-
-        if (sv == "unlock") {
-            // session unlocked
-            m_hyprlandLocked = false;
-            continue;
-        }
     }
 }
 
-bool CHyprlandInstance::run(bool safeMode, bool lockedCrash) {
+bool CHyprlandInstance::run(bool safeMode) {
     int pipefds[2];
     if (pipe(pipefds) != 0) {
         g_logger->log(Hyprutils::CLI::LOG_ERR, "pipe() failed, exiting");
@@ -174,9 +159,7 @@ bool CHyprlandInstance::run(bool safeMode, bool lockedCrash) {
     m_wakeupRead.setFlags(m_wakeupRead.getFlags() | FD_CLOEXEC);
     m_wakeupWrite.setFlags(m_wakeupWrite.getFlags() | FD_CLOEXEC);
 
-    m_hyprlandLocked = lockedCrash;
-
-    runHyprlandThread(safeMode, lockedCrash);
+    runHyprlandThread(safeMode);
 
     pollfd pollfds[2] = {
         {

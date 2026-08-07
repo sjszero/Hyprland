@@ -14,13 +14,11 @@ class CHyprlandInstance {
     CHyprlandInstance(CHyprlandInstance&)       = delete;
     CHyprlandInstance(CHyprlandInstance&&)      = delete;
 
-    bool run(bool safeMode = false, bool lockedCrash = false); // if returns false, restart.
+    bool run(bool safeMode = false); // if returns false, restart.
     void forceQuit();
 
-    bool m_hyprlandLocked = false;
-
   private:
-    void                           runHyprlandThread(bool safeMode, bool lockedCrash);
+    void                           runHyprlandThread(bool safeMode);
     void                           clearFd(const Hyprutils::OS::CFileDescriptor& fd);
     void                           dispatchHyprlandEvent();
 

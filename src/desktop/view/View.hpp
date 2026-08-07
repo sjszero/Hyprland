@@ -3,8 +3,6 @@
 #include "WLSurface.hpp"
 #include "../../helpers/math/Math.hpp"
 
-#include <cstdint>
-
 namespace Desktop::View {
     enum eViewType : uint8_t {
         VIEW_TYPE_WINDOW = 0,
@@ -16,7 +14,7 @@ namespace Desktop::View {
 
     class IView {
       public:
-        virtual ~IView();
+        virtual ~IView() = default;
 
         virtual SP<Desktop::View::CWLSurface> wlSurface() const;
         virtual SP<CWLSurfaceResource>        resource() const;
@@ -30,14 +28,6 @@ namespace Desktop::View {
       protected:
         IView(SP<Desktop::View::CWLSurface> pWlSurface);
 
-        void                          initView(WP<IView> self, eViewType type);
-
         SP<Desktop::View::CWLSurface> m_wlSurface;
-
-      private:
-        WP<IView> m_self;
-        eViewType m_type        = VIEW_TYPE_WINDOW;
-        uintptr_t m_address     = 0;
-        bool      m_initialized = false;
     };
 };

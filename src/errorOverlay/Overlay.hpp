@@ -32,7 +32,6 @@ namespace ErrorOverlay {
 
       private:
         void                       createQueued();
-        void                       updateReservedArea(bool reserve);
         std::string                m_queued = "";
         Config::CGradientValueData m_queuedBorderGradient;
         Config::CGradientValueData m_borderGradient;

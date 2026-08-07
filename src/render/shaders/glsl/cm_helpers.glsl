@@ -220,7 +220,7 @@ vec4
 #endif
 #if USE_TONEMAP
                        ,
-                       float maxLuminance, float dstMaxLuminance, float dstRefLuminance, float srcRefLuminance, int tonemapMode
+                       float maxLuminance, float dstMaxLuminance, float dstRefLuminance, float srcRefLuminance
 #endif
 #if USE_SDR_MOD
                        ,
@@ -245,7 +245,7 @@ vec4
     pixColor.a   = finalAlpha;
     pixColor.rgb *= pixColor.a;
 #if USE_TONEMAP
-    pixColor = tonemap(pixColor, dstxyz, maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance, tonemapMode);
+    pixColor = tonemap(pixColor, dstxyz, maxLuminance, dstMaxLuminance, dstRefLuminance, srcRefLuminance);
 #endif
 
 #if USE_MIRROR

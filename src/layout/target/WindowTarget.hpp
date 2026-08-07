@@ -13,13 +13,15 @@ namespace Layout {
 
         virtual eTargetType                                         type();
 
-        virtual void                                                setPositionGlobal(const STargetBox& box, uint8_t flags = TARGET_UPDATE_NONE);
+        virtual void                                                setPositionGlobal(const STargetBox& box);
         virtual void                                                assignToSpace(const SP<CSpace>& space, std::optional<Vector2D> focalPoint = std::nullopt);
         virtual PHLWINDOW                                           window() const;
 
         virtual bool                                                floating();
         virtual void                                                setFloating(bool x);
         virtual std::expected<SGeometryRequested, eGeometryFailure> desiredGeometry();
+        virtual eFullscreenMode                                     fullscreenMode();
+        virtual void                                                setFullscreenMode(eFullscreenMode mode);
         virtual std::optional<Vector2D>                             minSize();
         virtual std::optional<Vector2D>                             maxSize();
         virtual void                                                damageEntire();
@@ -31,7 +33,7 @@ namespace Layout {
 
         Vector2D     clampSizeForDesired(const Vector2D& size) const;
 
-        void         updatePos(uint8_t flags = TARGET_UPDATE_NONE);
+        void         updatePos();
 
         PHLWINDOWREF m_window;
     };

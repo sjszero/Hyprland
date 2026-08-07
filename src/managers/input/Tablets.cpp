@@ -2,7 +2,7 @@
 #include "../../desktop/view/Window.hpp"
 #include "../../protocols/Tablet.hpp"
 #include "../../devices/Tablet.hpp"
-#include "../../pointer/PointerManager.hpp"
+#include "../../managers/PointerManager.hpp"
 #include "../../managers/SeatManager.hpp"
 #include "../../protocols/PointerConstraints.hpp"
 #include "../../protocols/core/DataDevice.hpp"
@@ -73,7 +73,7 @@ static void refocusTablet(SP<CTablet> tab, SP<CTabletTool> tool, bool motion = f
 
         // yes, this technically ignores any regions set by the app. Too bad!
         if (WINDOW)
-            local = tool->m_absolutePos * WINDOW->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
+            local = tool->m_absolutePos * WINDOW->m_realSize->goal();
         else
             local = tool->m_absolutePos * BOX->size();
 
@@ -125,7 +125,7 @@ void CInputManager::onTabletAxis(CTablet::SAxisEvent e) {
 
         switch (e.tool->type) {
             case Aquamarine::ITabletTool::AQ_TABLET_TOOL_TYPE_MOUSE: {
-                Pointer::mgr()->move(delta);
+                g_pPointerManager->move(delta);
                 break;
             }
             default: {
@@ -135,9 +135,9 @@ void CInputManager::onTabletAxis(CTablet::SAxisEvent e) {
                     PTOOL->m_absolutePos.y = y;
 
                 if (PTAB->m_relativeInput)
-                    Pointer::mgr()->move(delta);
+                    g_pPointerManager->move(delta);
                 else
-                    Pointer::mgr()->warpAbsolute(transformToActiveRegion({x, y}, PTAB->m_activeArea), PTAB);
+                    g_pPointerManager->warpAbsolute(transformToActiveRegion({x, y}, PTAB->m_activeArea), PTAB);
 
                 break;
             }
@@ -186,9 +186,9 @@ void CInputManager::onTabletTip(CTablet::STipEvent e) {
     const auto POS   = e.tip;
 
     if (PTAB->m_relativeInput)
-        Pointer::mgr()->move({0, 0});
+        g_pPointerManager->move({0, 0});
     else
-        Pointer::mgr()->warpAbsolute(transformToActiveRegion(POS, PTAB->m_activeArea), PTAB);
+        g_pPointerManager->warpAbsolute(transformToActiveRegion(POS, PTAB->m_activeArea), PTAB);
 
     if (e.in)
         refocus();
@@ -254,7 +254,7 @@ void CInputManager::newTablet(SP<Aquamarine::ITablet> pDevice) {
         Log::logger->log(Log::ERR, "Tablet had no name???"); // logic error
     }
 
-    Pointer::mgr()->attachTablet(PNEWTABLET);
+    g_pPointerManager->attachTablet(PNEWTABLET);
 
     PNEWTABLET->m_events.destroy.listenStatic([this, tablet = PNEWTABLET.get()] {
         auto TABLET = tablet->m_self;
@@ -284,8 +284,6 @@ SP<CTabletTool> CInputManager::ensureTabletToolPresent(SP<Aquamarine::ITabletToo
         auto TOOL = tool->m_self;
         destroyTabletTool(TOOL.lock());
     });
-
-    setTabletToolConfigs();
 
     return PTOOL;
 }

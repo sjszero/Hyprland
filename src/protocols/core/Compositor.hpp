@@ -26,6 +26,7 @@
 #include "../types/SurfaceState.hpp"
 
 class CWLOutputResource;
+class CMonitor;
 class CWLSurfaceResource;
 class CWLSubsurfaceResource;
 class CViewportResource;
@@ -99,8 +100,8 @@ class CWLSurfaceResource {
         CSignalT<>                          unmap;
         CSignalT<SP<CWLSubsurfaceResource>> newSubsurface;
         CSignalT<>                          destroy;
-        CSignalT<PHLMONITOR>                enter;
-        CSignalT<PHLMONITOR>                leave;
+        CSignalT<SP<CMonitor>>              enter;
+        CSignalT<SP<CMonitor>>              leave;
     } m_events;
 
     SSurfaceState                          m_current;
@@ -124,7 +125,6 @@ class CWLSurfaceResource {
     SP<CWLSurfaceResource>                 findWithCM();
     void                                   presentFeedback(const Time::steady_tp& when, PHLMONITOR pMonitor, bool discarded = false);
     void                                   scheduleState(WP<SSurfaceState> state);
-    void                                   drainSyncFds(WP<SSurfaceState> state, eLockReason reason);
     void                                   commitState(SSurfaceState& state);
     NColorManagement::PImageDescription    getPreferredImageDescription();
     void                                   sortSubsurfaces();
@@ -136,19 +136,16 @@ class CWLSurfaceResource {
     std::pair<SP<CWLSurfaceResource>, Vector2D> at(const Vector2D& localCoords, bool allowsInput = false);
 
   private:
-    SP<CWlSurface>                     m_resource;
-    wl_client*                         m_client        = nullptr;
-    std::optional<wl_output_transform> m_lastTransform = std::nullopt;
-    std::optional<int>                 m_lastScale     = std::nullopt;
+    SP<CWlSurface>         m_resource;
+    wl_client*             m_client = nullptr;
 
-    void                               destroy();
-    void                               releaseBuffers(bool onlyCurrent = true);
-    void                               dropPendingBuffer();
-    void                               dropCurrentBuffer();
-    void                               discardPresentationFeedbacks();
-    void                               bfHelper(std::span<const SP<CWLSurfaceResource>> nodes, std::function<void(SP<CWLSurfaceResource>, const Vector2D&, void*)> fn, void* data);
-    SP<CWLSurfaceResource>             findFirstPreorderHelper(SP<CWLSurfaceResource> root, std::function<bool(SP<CWLSurfaceResource>)> fn);
-    void                               updateCursorShm(CRegion damage = CBox{0, 0, INT16_MAX, INT16_MAX});
+    void                   destroy();
+    void                   releaseBuffers(bool onlyCurrent = true);
+    void                   dropPendingBuffer();
+    void                   dropCurrentBuffer();
+    void                   bfHelper(std::span<const SP<CWLSurfaceResource>> nodes, std::function<void(SP<CWLSurfaceResource>, const Vector2D&, void*)> fn, void* data);
+    SP<CWLSurfaceResource> findFirstPreorderHelper(SP<CWLSurfaceResource> root, std::function<bool(SP<CWLSurfaceResource>)> fn);
+    void                   updateCursorShm(CRegion damage = CBox{0, 0, INT16_MAX, INT16_MAX});
 
     friend class CWLPointerResource;
 };
