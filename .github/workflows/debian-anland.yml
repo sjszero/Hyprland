@@ -10,11 +10,11 @@ permissions:
 
 jobs:
   build:
-    name: Build Aquamarine and Hyprland Debian packages
-    runs-on: ubuntu-24.04
+    name: Build Aquamarine and Hyprland arm64 Debian packages
+    # Native GitHub-hosted ARM64 runner.  debian:forky is multi-architecture,
+    # so Docker pulls its arm64 image and dpkg-buildpackage produces arm64 .deb files.
+    runs-on: ubuntu-24.04-arm
     container:
-      # GitHub-hosted Ubuntu runners are x86_64, so this native container build
-      # produces amd64 packages.  It is not an arm64 build environment.
       image: debian:forky
     steps:
       - name: Checkout fork
@@ -44,9 +44,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/ccache
-          key: ${{ runner.os }}-forky-arm64-ccache-${{ hashFiles('**/CMakeLists.txt', '**/debian/**', 'src/**', 'aquamarine-0.12.1/**') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-forky-ccache-${{ hashFiles('**/CMakeLists.txt', '**/debian/**', 'src/**', 'aquamarine-0.12.1/**') }}
           restore-keys: |
-            ${{ runner.os }}-forky-arm64-ccache-
+            ${{ runner.os }}-${{ runner.arch }}-forky-ccache-
 
       - name: Prepare unprivileged builder
         run: |
@@ -62,7 +62,7 @@ jobs:
       - name: Verify selected packages
         run: |
           host_arch=$(dpkg --print-architecture)
-          test "$host_arch" = amd64
+          test "$host_arch" = arm64
           test -f "artifacts/hyprland_0.55.4+ds-2_${host_arch}.deb"
           test -f "artifacts/libaquamarine11_0.12.1-1_${host_arch}.deb"
           test "$(find artifacts -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 2

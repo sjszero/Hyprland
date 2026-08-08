@@ -7,20 +7,13 @@ Can be dropped when Debian's gcc catches up
 Origin: https://github.com/cpiber/hyprland-ppa/blob/0dcd5f3101f7ced40879d0f34f337b1a2cdd79ae/hyprland/debian/patches/04-gcc-port
 Forwarded: not-needed
 ---
- src/helpers/Monitor.cpp | 3 ++-
+ src/output/Monitor.cpp | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
-diff --git a/src/helpers/Monitor.cpp b/src/helpers/Monitor.cpp
-index 5d1a7ef..ba4bf0d 100644
---- a/src/helpers/Monitor.cpp
-+++ b/src/helpers/Monitor.cpp
-@@ -745,7 +745,8 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule, bool force)
-         std::ranges::sort(sortedModes, sortFunc);
-         if (sortedModes.size() > 3)
-             sortedModes.erase(sortedModes.begin() + 3, sortedModes.end());
+diff --git a/src/output/Monitor.cpp b/src/output/Monitor.cpp
+--- a/src/output/Monitor.cpp
++++ b/src/output/Monitor.cpp
+@@ -766 +766,2 @@
 -        requestedModes.insert_range(requestedModes.end(), sortedModes | std::views::reverse);
 +        auto x = sortedModes | std::views::reverse;
 +        requestedModes.insert(requestedModes.end(), x.cbegin(), x.cend());
-     };
- 
-     // last fallback is always preferred mode
