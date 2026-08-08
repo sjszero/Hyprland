@@ -5,9 +5,9 @@ Uploaders:
  Alan M Varghese (NyxTrail) <alan@digistorm.in>,
  Carl Keinath <carl.keinath@gmail.com>,
  Chow Loong Jin <hyperair@debian.org>,
- Alex Myczko <tar@debian.org>
+  Alex Myczko <tar@debian.org>
 Build-Depends:
- libaquamarine-dev (>= 0.9.3),
+ libaquamarine-dev (>= 0.12.1),
  cmake,
  cpio,
  debhelper-compat (= 13),
@@ -133,7 +133,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends:
- libaquamarine-dev (>= 0.9.3),
+  libaquamarine-dev (>= 0.12.1),
  libcairo2-dev | libcairo-dev,
  libegl-dev,
  libgles-dev,

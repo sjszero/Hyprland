@@ -1,0 +1,23 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 10:30:00 +0800
+Subject: compat: explicitly convert swipe workspace pointer to bool
+
+Forky's hyprutils makes CSharedPointer boolean conversion explicit. The
+workspace swipe gesture returns this pointer from a bool function, so convert
+it explicitly.
+
+---
+ src/managers/input/UnifiedWorkspaceSwipeGesture.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/src/managers/input/UnifiedWorkspaceSwipeGesture.cpp
++++ b/src/managers/input/UnifiedWorkspaceSwipeGesture.cpp
+@@ -6,8 +6,8 @@
+ #include "InputManager.hpp"
+ 
+ bool CUnifiedWorkspaceSwipeGesture::isGestureInProgress() {
+-    return m_workspaceBegin;
++    return static_cast<bool>(m_workspaceBegin);
+ }
+ 
+ void CUnifiedWorkspaceSwipeGesture::begin() {

@@ -1,0 +1,18 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 11:10:00 +0800
+Subject: [PATCH] compat: explicitly convert layer-shell texture pointer to bool
+
+Forky's hyprutils marks CSharedPointer::operator bool() explicit. The
+attached-buffer state is a bool and therefore requires an explicit conversion.
+
+--- a/src/protocols/LayerShell.cpp
++++ b/src/protocols/LayerShell.cpp
+@@ -44,7 +44,7 @@ CLayerSurface::CLayerSurface(SP<CZwlrLayerSurfaceV1> resource_, SP<CWLSurfaceRe
+         m_current           = m_pending;
+         m_pending.committed = 0;
+ 
+-        bool attachedBuffer = m_surface->m_current.texture;
++        bool attachedBuffer = static_cast<bool>(m_surface->m_current.texture);
+ 
+         if (attachedBuffer && !m_configured) {
+             m_surface->error(-1, "layerSurface was not configured, but a buffer was attached");

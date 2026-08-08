@@ -1,0 +1,23 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 10:00:00 +0800
+Subject: compat: explicitly convert scrolling fullscreen target pointer
+
+Forky's hyprutils makes CSharedPointer boolean conversion explicit. The
+scrolling layout passes the fullscreen-target pointer to a boolean lambda
+parameter, so convert it explicitly.
+
+---
+ src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.cpp
++++ b/src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.cpp
+@@ -509,7 +509,7 @@ void SScrollingData::recalculate(bool forceInstant) {
+                 TARGET->layoutBox = controller->calculateTargetBox(i, j, USABLE, WORKAREA.pos(), *PFSONONE);
+ 
+             if (TARGET->target)
+-                TARGET->target->setPositionGlobal(targetBoxWithGaps(TARGET->layoutBox, i, j, FS));
++                TARGET->target->setPositionGlobal(targetBoxWithGaps(TARGET->layoutBox, i, j, static_cast<bool>(FS)));
+ 
+             if (forceInstant && TARGET->target)
+                 TARGET->target->warpPositionSize();

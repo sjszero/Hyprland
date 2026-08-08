@@ -1,0 +1,27 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 12:10:00 +0800
+Subject: [PATCH] compat: explicitly convert render shared pointers to bool
+
+Forky hyprutils uses an explicit CSharedPointer boolean conversion.
+
+--- a/src/render/GLRenderer.cpp
++++ b/src/render/GLRenderer.cpp
+@@ -55,7 +55,7 @@ bool CHyprGLRenderer::initRenderBuffer(SP<Aquamarine::IBuffer> buffer, uint32_t
+         return false;
+     }
+ 
+-    return m_currentRenderbuffer;
++    return static_cast<bool>(m_currentRenderbuffer);
+ }
+ 
+ bool CHyprGLRenderer::beginFullFakeRenderInternal(PHLMONITOR pMonitor, CRegion& damage, SP<IFramebuffer> fb, bool simple) {
+--- a/src/render/OpenGL.cpp
++++ b/src/render/OpenGL.cpp
+@@ -740,7 +740,7 @@ void CHyprOpenGLImpl::begin(PHLMONITOR pMonitor, const CRegion& damage_, SP<IFr
+     g_pHyprRenderer->m_renderData.damage.set(damage_);
+     g_pHyprRenderer->m_renderData.finalDamage.set(finalDamage.value_or(damage_));
+ 
+-    m_fakeFrame = fb;
++    m_fakeFrame = static_cast<bool>(fb);
+ 
+     if (g_pHyprRenderer->m_reloadScreenShader) {

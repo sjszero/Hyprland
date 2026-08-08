@@ -1,0 +1,36 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 11:20:00 +0800
+Subject: [PATCH] compat: make data-device smart-pointer conversions explicit
+
+Forky's hyprutils disallows direct integer casts of smart pointers and makes
+implicit conversion in a bool return invalid.  Preserve the null-texture test
+with a contextual boolean test.
+
+--- a/src/protocols/core/DataDevice.cpp
++++ b/src/protocols/core/DataDevice.cpp
+@@ -564,6 +564,6 @@ void CWLDataDeviceProtocol::initiateDrag(WP<CWLDataSourceResource> currentSourc
+     Cursor::overrideController->setOverride("grabbing", Cursor::CURSOR_OVERRIDE_DND);
+     m_dnd.overriddenCursor = true;
+ 
+-    LOGM(Log::DEBUG, "initiateDrag: source {:x}, surface: {:x}, origin: {:x}", (uintptr_t)currentSource.get(), (uintptr_t)dragSurface, (uintptr_t)origin);
++    LOGM(Log::DEBUG, "initiateDrag: source {:x}, surface: {:x}, origin: {:x}", (uintptr_t)currentSource.get(), (uintptr_t)dragSurface.get(), (uintptr_t)origin.get());
+ 
+     currentSource->m_used = true;
+@@ -579,7 +579,7 @@ void CWLDataDeviceProtocol::initiateDrag(WP<CWLDataSourceResource> currentSourc
+                 return;
+             }
+ 
+-            if (m_dnd.dndSurface->m_current.texture <= 0 && m_dnd.dndSurface->m_mapped) {
++            if (!m_dnd.dndSurface->m_current.texture && m_dnd.dndSurface->m_mapped) {
+                 m_dnd.dndSurface->unmap();
+                 return;
+             }
+@@ -836,7 +836,7 @@ void CWLDataDeviceProtocol::renderDND(PHLMONITOR pMonitor, timespec* when) {
+ }
+ 
+ bool CWLDataDeviceProtocol::dndActive() {
+-    return m_dnd.currentSource;
++    return static_cast<bool>(m_dnd.currentSource);
+ }
+ 
+ void CWLDataDeviceProtocol::abortDndIfPresent() {

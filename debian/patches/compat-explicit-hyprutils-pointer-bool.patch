@@ -1,0 +1,36 @@
+From: Anland Hyprland Maintainers
+Date: Fri, 8 Aug 2026 08:30:00 +0800
+Subject: compat: use explicit conversions for hyprutils pointers
+
+Forky's hyprutils makes CSharedPointer and CWeakPointer bool conversion
+explicit.  Make return values and range predicates explicit as well.
+
+---
+ src/Compositor.hpp                    | 2 +-
+ src/desktop/view/LayerSurface.hpp     | 4 ++--
+ src/protocols/DRMSyncobj.hpp          | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/Compositor.hpp b/src/Compositor.hpp
+--- a/src/Compositor.hpp
++++ b/src/Compositor.hpp
+@@ -88,1 +88,1 @@
+-        return std::views::filter(m_workspaces, [](const auto& e) { return e; });
++        return std::views::filter(m_workspaces, [](const auto& e) { return static_cast<bool>(e); });
+
+diff --git a/src/desktop/view/LayerSurface.hpp b/src/desktop/view/LayerSurface.hpp
+--- a/src/desktop/view/LayerSurface.hpp
++++ b/src/desktop/view/LayerSurface.hpp
+@@ -89,1 +89,1 @@
+-        return l;
++        return static_cast<bool>(l);
+@@ -93,1 +93,1 @@
+-        return l;
++        return static_cast<bool>(l);
+
+diff --git a/src/protocols/DRMSyncobj.hpp b/src/protocols/DRMSyncobj.hpp
+--- a/src/protocols/DRMSyncobj.hpp
++++ b/src/protocols/DRMSyncobj.hpp
+@@ -30,1 +30,1 @@
+-        return m_timeline;
++        return static_cast<bool>(m_timeline);

@@ -20,6 +20,8 @@ Build-Depends:
  libhyprutils-dev (>= 0.10.4),
  libinput-dev (>= 1.26.0),
  libpixman-1-dev,
+ libpipewire-0.3-dev,
+ libspa-0.2-dev,
  libseat-dev (>= 0.8.0),
  libudev-dev,
  libwayland-dev,
@@ -54,8 +56,10 @@ Package: libaquamarine11
 Architecture: any
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+  ${misc:Depends},
+  ${shlibs:Depends},
+  libpipewire-0.3-0t64,
+  libspa-0.2-modules,
 Description: Light-weight rendering library for Linux (binary files)
  Aquamarine is a very light Linux rendering backend library.
  It provides basic abstractions for an application to render on a

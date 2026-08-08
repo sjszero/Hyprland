@@ -13,46 +13,70 @@ jobs:
     name: Build Aquamarine and Hyprland Debian packages
     runs-on: ubuntu-24.04
     container:
-      image: debian:trixie
+      # The packages are intended for a pure Debian forky installation.
+      image: debian:forky
     steps:
-      - name: Install build tooling
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates git build-essential devscripts debhelper equivs fakeroot \
-            pkg-config dpkg-dev
-
       - name: Checkout fork
         uses: actions/checkout@v4
 
-      - name: Install Aquamarine build dependencies
-        working-directory: aquamarine-0.12.1
+      - name: Install build dependencies
         run: |
-          mk-build-deps --install --remove --tool 'apt-get -y' debian/control
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates ccache cmake cpio debhelper-compat \
+            devscripts dpkg-dev fakeroot g++-16 git pkg-config pkgconf sudo hwdata \
+            hyprland-protocols hyprwayland-scanner hyprwire-scanner \
+            libcairo-dev libdisplay-info-dev libdrm-dev libegl-dev \
+            libegl1-mesa-dev libgbm-dev libgles-dev libglaze-dev \
+            libhyprcursor-dev libhyprgraphics-dev libhyprlang-dev \
+            libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev \
+            liblua5.5-dev libmuparser-dev libpango1.0-dev libpixman-1-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libseat-dev libre2-dev \
+            libssl-dev libtomlplusplus-dev libudev-dev libudis86-dev \
+            libwayland-dev libxkbcommon-dev libxcb1-dev libxcb-render0-dev \
+            libxcb-xfixes0-dev libxcb-icccm4-dev libxcb-composite0-dev \
+            libxcb-res0-dev libxcb-errors-dev libxcursor-dev glslang-dev \
+            glslang-tools wayland-protocols xwayland xxd
 
-      - name: Build Aquamarine
-        working-directory: aquamarine-0.12.1
-        run: dpkg-buildpackage -us -uc -b
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/ccache
+          key: ${{ runner.os }}-forky-arm64-ccache-${{ hashFiles('**/CMakeLists.txt', '**/debian/**', 'src/**', 'aquamarine-0.12.1/**') }}
+          restore-keys: |
+            ${{ runner.os }}-forky-arm64-ccache-
 
-      - name: Install the matching Aquamarine packages
+      - name: Prepare unprivileged builder
         run: |
-          apt-get install -y ../libaquamarine*.deb
+          useradd --create-home --shell /bin/bash builder
+          echo 'builder ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      - name: Install Hyprland build dependencies
+      - name: Build Aquamarine and Hyprland
         run: |
-          mk-build-deps --install --remove --tool 'apt-get -y' debian/control
+          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && DEB_BUILD_OPTIONS=parallel=2 ./build-anland.sh"
 
-      - name: Build Hyprland
-        run: dpkg-buildpackage -us -uc -b
-
-      - name: Collect packages
+      - name: Prepare package artifact
         run: |
-          mkdir -p artifacts
-          find .. -maxdepth 1 -type f -name '*.deb' -exec cp -v {} artifacts/ \;
-          sha256sum artifacts/*.deb > artifacts/SHA256SUMS
+          # Upload a tar archive instead of a directory: this preserves the
+          # executable mode of files shipped inside the Debian packages.
+          rm -rf artifact-root anland-debian-packages.tar.gz
+          install -d -m 0755 artifact-root
+          cp -a artifacts/. artifact-root/
+          find artifact-root -type d -exec chmod 0755 {} +
+          find artifact-root -type f -name '*.deb' -exec chmod 0644 {} +
+          chmod 0644 artifact-root/SHA256SUMS
+          tar --numeric-owner --owner=0 --group=0 -czf anland-debian-packages.tar.gz artifact-root
+          sha256sum anland-debian-packages.tar.gz > anland-debian-packages.tar.gz.sha256
 
-      - name: Upload Debian packages
+      - name: Upload Debian package archive
         uses: actions/upload-artifact@v4
         with:
           name: anland-debian-packages
-          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            anland-debian-packages.tar.gz
+            anland-debian-packages.tar.gz.sha256

@@ -26,6 +26,12 @@ override_dh_auto_configure:
 override_dh_dwz:
 	dh_dwz -XHyprland # Skipping dwz, compression not beneficial on Hyprland
 
+# The build host may contain stray /usr/lib copies of Aquamarine (for example
+# from a prior local build).  Restrict shlibdeps to Debian's multiarch library
+# directory, where libaquamarine11 installs its shlibs metadata.
+override_dh_shlibdeps:
+	dh_shlibdeps -l/usr/lib/${DEB_HOST_MULTIARCH}
+
 override_dh_gencontrol:
 	. debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/hyprland/debian-abi-helper && \
 	dh_gencontrol -- \
