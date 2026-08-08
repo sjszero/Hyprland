@@ -13,7 +13,8 @@ jobs:
     name: Build Aquamarine and Hyprland Debian packages
     runs-on: ubuntu-24.04
     container:
-      # The packages are intended for a pure Debian forky installation.
+      # GitHub-hosted Ubuntu runners are x86_64, so this native container build
+      # produces amd64 packages.  It is not an arm64 build environment.
       image: debian:forky
     steps:
       - name: Checkout fork
@@ -57,6 +58,14 @@ jobs:
       - name: Build Aquamarine and Hyprland
         run: |
           su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && DEB_BUILD_OPTIONS=parallel=2 ./build-anland.sh"
+
+      - name: Verify selected packages
+        run: |
+          host_arch=$(dpkg --print-architecture)
+          test "$host_arch" = amd64
+          test -f "artifacts/hyprland_0.55.4+ds-2_${host_arch}.deb"
+          test -f "artifacts/libaquamarine11_0.12.1-1_${host_arch}.deb"
+          test "$(find artifacts -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 2
 
       - name: Prepare package artifact
         run: |

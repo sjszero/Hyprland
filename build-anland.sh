@@ -132,75 +132,9 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
 
 (
     cd "$stage"
-    # The source checkout may not have quilt state. Apply the forky hyprutils
-    # compatibility patch explicitly in the native staging tree.
-    if grep -q 'return std::views::filter(m_workspaces, \[\](const auto& e) { return e; });' src/Compositor.hpp; then
-        patch --batch -p1 < debian/patches/compat-explicit-hyprutils-pointer-bool.patch
-    fi
-    grep -q 'static_cast<bool>(e)' src/Compositor.hpp
-    grep -q 'static_cast<bool>(m_timeline)' src/protocols/DRMSyncobj.hpp
-    if grep -q 'const bool ISWINDOWGROUP       = window->m_group;' src/config/shared/actions/ConfigActions.cpp; then
-        patch --batch -p1 < debian/patches/compat-explicit-group-pointer-bool.patch
-    fi
-    grep -q 'ISWINDOWGROUP       = static_cast<bool>(window->m_group)' src/config/shared/actions/ConfigActions.cpp
-    if grep -q 'return e == m_self;' src/desktop/view/SessionLock.cpp; then
-        patch --batch -p1 < debian/patches/compat-session-lock-view-pointer-comparison.patch
-    fi
-    grep -q 'const SP<IView> self = m_self.lock();' src/desktop/view/SessionLock.cpp
-    if grep -q 'return m_resource;' src/desktop/view/WLSurface.cpp; then
-        patch --batch -p1 < debian/patches/compat-window-pointer-conversions-and-comparisons.patch
-    fi
-    grep -q 'return static_cast<bool>(m_resource);' src/desktop/view/WLSurface.cpp
-    grep -q 'dragController()->target() == layoutTarget()' src/desktop/view/Window.cpp
-    grep -q 'layoutTarget() == g_layoutManager->dragController()->target()' src/desktop/view/Window.cpp
-    grep -q 'isGroup               = static_cast<bool>(m_group)' src/desktop/view/Window.cpp
-    if grep -q 'targetBoxWithGaps(TARGET->layoutBox, i, j, FS)' src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.cpp; then
-        patch --batch -p1 < debian/patches/compat-scrolling-fullscreen-pointer-bool.patch
-    fi
-    grep -q 'targetBoxWithGaps(TARGET->layoutBox, i, j, static_cast<bool>(FS))' src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.cpp
-    if grep -q 'std::erase_if(m_data, \[&window\](auto& w) { return w == window; });' src/managers/ANRManager.cpp; then
-        patch --batch -p1 < debian/patches/compat-anr-data-window-comparison.patch
-    fi
-    grep -q 'std::erase_if(m_data, \[&window\](const auto& data) { return data->fitsWindow(window); });' src/managers/ANRManager.cpp
-    if grep -q 'pFoundWindow != g_layoutManager->dragController()->target()' src/managers/input/InputManager.cpp; then
-        patch --batch -p1 < debian/patches/compat-input-drag-target-comparison.patch
-    fi
-    grep -q 'pFoundWindow->layoutTarget() != g_layoutManager->dragController()->target()' src/managers/input/InputManager.cpp
-    if grep -q 'return m_workspaceBegin;' src/managers/input/UnifiedWorkspaceSwipeGesture.cpp; then
-        patch --batch -p1 < debian/patches/compat-workspace-swipe-pointer-bool.patch
-    fi
-    grep -q 'return static_cast<bool>(m_workspaceBegin);' src/managers/input/UnifiedWorkspaceSwipeGesture.cpp
-    if grep -q '(uintptr_t)m_surface);' src/protocols/ColorManagement.cpp; then
-        patch --batch -p1 < debian/patches/compat-color-management-weak-pointer-log.patch
-    fi
-    grep -q '(uintptr_t)m_surface.get());' src/protocols/ColorManagement.cpp
-    if grep -q 'return m_resource;' src/protocols/ExtWorkspace.cpp; then
-        patch --batch -p1 < debian/patches/compat-protocol-unique-pointer-bool-and-log.patch
-    fi
-    grep -q 'return static_cast<bool>(m_resource);' src/protocols/ExtWorkspace.cpp
-    grep -q '(uintptr_t)RESOURCE.get(), (uintptr_t)surf.get()' src/protocols/Fifo.cpp
-    if grep -q 'bool attachedBuffer = m_surface->m_current.texture;' src/protocols/LayerShell.cpp; then
-        patch --batch -p1 < debian/patches/compat-layer-shell-texture-pointer-bool.patch
-    fi
-    grep -q 'bool attachedBuffer = static_cast<bool>(m_surface->m_current.texture);' src/protocols/LayerShell.cpp
-    if grep -q 'return m_dnd.currentSource;' src/protocols/core/DataDevice.cpp; then
-        patch --batch -p1 < debian/patches/compat-data-device-pointer-conversions.patch
-    fi
-    grep -q 'return static_cast<bool>(m_dnd.currentSource);' src/protocols/core/DataDevice.cpp
-    grep -q '(uintptr_t)dragSurface.get(), (uintptr_t)origin.get()' src/protocols/core/DataDevice.cpp
-    if grep -q 'return m_buffer;' src/protocols/types/Buffer.cpp; then
-        patch --batch -p1 < debian/patches/compat-buffer-explicit-pointer-bool.patch
-    fi
-    grep -q 'return static_cast<bool>(m_buffer);' src/protocols/types/Buffer.cpp
-    if grep -q 'return m_currentRenderbuffer;' src/render/GLRenderer.cpp; then
-        patch --batch -p1 < debian/patches/compat-render-pointer-bool.patch
-    fi
-    grep -q 'return static_cast<bool>(m_currentRenderbuffer);' src/render/GLRenderer.cpp
-    grep -q 'm_fakeFrame = static_cast<bool>(fb);' src/render/OpenGL.cpp
-    if grep -q 'bool connected = m_listeners.destroySurface;' src/xwayland/XSurface.cpp; then
-        patch --batch -p1 < debian/patches/compat-xwayland-listener-pointer-bool.patch
-    fi
-    grep -q 'bool connected = static_cast<bool>(m_listeners.destroySurface);' src/xwayland/XSurface.cpp
+    # Hyprland 0.55.4+ds already uses explicit-safe pointer idioms (for example
+    # !!pointer) in this restored source baseline.  No out-of-tree hyprutils
+    # source compatibility patch is required.
     # This Debian packaging helper must be part of CMake before configure;
     # source checkouts without quilt state do not apply it automatically.
     if ! grep -q 'add_executable(dumpabiver debian/dumpabiver.cpp)' CMakeLists.txt; then
@@ -210,13 +144,19 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
     dpkg-buildpackage -us -uc -b
 )
 
+# Retain only the required runtime packages.  Background, debug and development
+# packages are deliberately left in the temporary build directory and removed on exit.
 mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
-# Aquamarine is built one level below $stage, so its packages land in $stage.
-# Hyprland is built at $stage itself, so dpkg-buildpackage writes its packages
-# to $stage's parent directory.
-find "$stage" -maxdepth 1 -type f -name '*.deb' -exec cp -f {} "$root/artifacts/" \;
-find "$(dirname "$stage")" -maxdepth 1 -type f -name 'hyprland*.deb' -exec cp -f {} "$root/artifacts/" \;
+for package in \
+    "$stage"/hyprland_0.55.4+ds-2_"$multiarch".deb \
+    "$stage"/libaquamarine11_0.12.1-1_"$multiarch".deb; do
+    if [ ! -f "$package" ]; then
+        echo "build-anland: expected package was not produced: $package" >&2
+        exit 2
+    fi
+    cp -f "$package" "$root/artifacts/"
+done
 sha256sum "$root/artifacts"/*.deb > "$root/artifacts/SHA256SUMS"
 if [ "$cache_enabled" -eq 1 ]; then
     ccache --show-stats
