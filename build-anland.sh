@@ -44,8 +44,8 @@ EOF
         libgbm-dev libgles-dev libglaze-dev libhyprcursor-dev libhyprgraphics-dev \
         libhyprlang-dev libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev \
         liblua5.5-dev libmuparser-dev libpango1.0-dev libpixman-1-dev \
-        libpipewire-0.3-dev libspa-0.2-dev libseat-dev libre2-dev libssl-dev \
-        libtomlplusplus-dev libudev-dev libudis86-dev libwayland-dev libxkbcommon-dev \
+        libpipewire-0.3-dev libspa-0.2-dev libseat-dev libeis-dev libre2-dev libssl-dev \
+        libsdbus-c++-dev libtomlplusplus-dev libudev-dev libudis86-dev libwayland-dev libxkbcommon-dev \
         libxcb1-dev libxcb-render0-dev libxcb-xfixes0-dev libxcb-icccm4-dev \
         libxcb-composite0-dev libxcb-res0-dev libxcb-errors-dev libxcursor-dev \
         glslang-dev glslang-tools wayland-protocols xwayland xxd
@@ -55,6 +55,7 @@ fi
 # search path, causing it to link an unpackaged library copy instead of the
 # multiarch library in libaquamarine11.
 multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
+deb_arch=$(dpkg-architecture -qDEB_HOST_ARCH)
 export PKG_CONFIG_LIBDIR="/usr/lib/$multiarch/pkgconfig:/usr/share/pkgconfig"
 
 # Forky's libhyprgraphics is built against the GCC 16 C++ ABI.  The default
@@ -101,7 +102,8 @@ cp -a "$root/." "$stage/"
 # control files as shell scripts.
 find "$stage/debian" "$stage/aquamarine-0.12.1/debian" -type f -exec chmod -x {} + 2>/dev/null || true
 chmod +x "$stage/debian/rules" "$stage/aquamarine-0.12.1/debian/rules" \
-    "$stage/aquamarine-0.12.1/data/hwdata.sh"
+    "$stage/aquamarine-0.12.1/data/hwdata.sh" \
+    "$stage/scripts/generateShaderIncludes.sh"
 
 # The embedded source tree already contains the Anland implementation files,
 # while this compatibility change is intentionally delivered only as a quilt
@@ -135,13 +137,12 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
     # Hyprland 0.55.4+ds already uses explicit-safe pointer idioms (for example
     # !!pointer) in this restored source baseline.  No out-of-tree hyprutils
     # source compatibility patch is required.
-    # This Debian packaging helper must be part of CMake before configure;
-    # source checkouts without quilt state do not apply it automatically.
-    if ! grep -q 'add_executable(dumpabiver debian/dumpabiver.cpp)' CMakeLists.txt; then
-        patch --batch -p1 < debian/patches/Add-dumpabiver-abi-helper-to-main-CMakeLists.txt.patch
-    fi
-    grep -q 'add_executable(dumpabiver debian/dumpabiver.cpp)' CMakeLists.txt
+    # dpkg-buildpackage invokes dpkg-source, which applies every patch declared
+    # in debian/patches/series (including the ABI helper) to its private source
+    # state.  Do not pre-apply a series patch here: doing so creates an
+    # unrepresentable source change and makes dpkg-source reject the build.
     dpkg-buildpackage -us -uc -b
+
 )
 
 # Retain only the required runtime packages.  Background, debug and development
@@ -149,8 +150,8 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
 mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
 for package in \
-    "$stage"/hyprland_0.55.4+ds-2_"$multiarch".deb \
-    "$stage"/libaquamarine11_0.12.1-1_"$multiarch".deb; do
+    "$(dirname "$stage")"/hyprland_0.55.4+ds-2_"$deb_arch".deb \
+    "$stage"/libaquamarine11_0.12.1-1_"$deb_arch".deb; do
     if [ ! -f "$package" ]; then
         echo "build-anland: expected package was not produced: $package" >&2
         exit 2
