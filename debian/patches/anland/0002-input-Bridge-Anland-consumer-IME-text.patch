@@ -2,11 +2,12 @@ From: Anland Hyprland Maintainers <anland@example.invalid>
 Date: Thu, 7 Aug 2026 13:00:00 +0800
 Subject: input: bridge Anland consumer input and Android IME text
 
-diff --git a/src/managers/input/InputMethodRelay.cpp b/src/managers/input/InputMethodRelay.cpp
-index 27fd80b..04ec6d0 100644
---- a/src/managers/input/InputMethodRelay.cpp
-+++ b/src/managers/input/InputMethodRelay.cpp
-@@ -131,9 +131,9 @@ void CInputMethodRelay::commitIMEState(CTextInput* pInput) {
+---
+Index: anland-quilt4/src/managers/input/InputMethodRelay.cpp
+===================================================================
+--- anland-quilt4.orig/src/managers/input/InputMethodRelay.cpp
++++ anland-quilt4/src/managers/input/InputMethodRelay.cpp
+@@ -131,9 +131,9 @@ void CInputMethodRelay::commitIMEState(C
  }
  
  void CInputMethodRelay::onKeyboardFocus(SP<CWLSurfaceResource> pSurface) {
@@ -19,7 +20,7 @@ index 27fd80b..04ec6d0 100644
      if (pSurface == m_lastKbFocus)
          return;
  
-@@ -150,9 +150,6 @@ void CInputMethodRelay::onKeyboardFocus(SP<CWLSurfaceResource> pSurface) {
+@@ -150,9 +150,6 @@ void CInputMethodRelay::onKeyboardFocus(
          return;
  
      for (auto const& ti : m_textInputs) {
@@ -29,17 +30,17 @@ index 27fd80b..04ec6d0 100644
          if (ti->client() != pSurface->client())
              continue;
  
-@@ -176,4 +173,4 @@ CInputPopup* CInputMethodRelay::popupFromSurface(const SP<CWLSurfaceResource> su
+@@ -176,4 +173,4 @@ CInputPopup* CInputMethodRelay::popupFro
      }
  
      return nullptr;
 -}
 +}
-\ No newline at end of file
-diff --git a/src/managers/input/TextInput.cpp b/src/managers/input/TextInput.cpp
-index be9a5d2..a51191c 100644
---- a/src/managers/input/TextInput.cpp
-+++ b/src/managers/input/TextInput.cpp
+\ 文件末尾没有换行符
+Index: anland-quilt4/src/managers/input/TextInput.cpp
+===================================================================
+--- anland-quilt4.orig/src/managers/input/TextInput.cpp
++++ anland-quilt4/src/managers/input/TextInput.cpp
 @@ -50,11 +50,6 @@ void CTextInput::destroy() {
  void CTextInput::onEnabled(SP<CWLSurfaceResource> surfV1) {
      Log::logger->log(Log::DEBUG, "TI ENABLE");
@@ -52,7 +53,7 @@ index be9a5d2..a51191c 100644
      // v1 only, map surface to PTI
      if (!isV3()) {
          if (Desktop::focusState()->surface() != surfV1 || !m_v1Input->m_active)
-@@ -63,15 +58,11 @@ void CTextInput::onEnabled(SP<CWLSurfaceResource> surfV1) {
+@@ -63,15 +58,11 @@ void CTextInput::onEnabled(SP<CWLSurface
          enter(surfV1);
      }
  
@@ -140,11 +141,11 @@ index be9a5d2..a51191c 100644
 +            fprintf(stderr, "anland: commitStringFromConsumer V1 lock=%d active=%d\n", (bool)V1, V1 ? (int)V1->m_active : -1);
 +    }
 +}
-\ No newline at end of file
-diff --git a/src/managers/input/TextInput.hpp b/src/managers/input/TextInput.hpp
-index 798f31e..a0d6866 100644
---- a/src/managers/input/TextInput.hpp
-+++ b/src/managers/input/TextInput.hpp
+\ 文件末尾没有换行符
+Index: anland-quilt4/src/managers/input/TextInput.hpp
+===================================================================
+--- anland-quilt4.orig/src/managers/input/TextInput.hpp
++++ anland-quilt4/src/managers/input/TextInput.hpp
 @@ -32,6 +32,10 @@ class CTextInput {
      bool                   isEnabled();
      bool                   hasCursorRectangle();
@@ -162,4 +163,4 @@ index 798f31e..a0d6866 100644
      } m_listeners;
 -};
 +};
-\ No newline at end of file
+\ 文件末尾没有换行符

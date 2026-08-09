@@ -1,36 +1,43 @@
 From: Anland Hyprland Maintainers <anland@example.invalid>
 Date: Thu, 7 Aug 2026 13:00:00 +0800
 Subject: core: add Anland backend selection and clipboard relay
-
-diff --git a/src/Compositor.cpp b/src/Compositor.cpp
-index f9ef1a3..b4239cc 100644
---- a/src/Compositor.cpp
-+++ b/src/Compositor.cpp
-@@ -27,6 +27,10 @@
- #include "managers/screenshare/ScreenshareManager.hpp"
- #include <algorithm>
+Add Anland backend selection logic (AQ_BACKEND_ANLAND mandatory + HEADLESS fallback),
+CAnlandClipboardSource class for non-blocking poll-based clipboard relay,
+and --anland CLI flag.
+---
+Index: anland-quilt4/src/Compositor.cpp
+===================================================================
+--- anland-quilt4.orig/src/Compositor.cpp
++++ anland-quilt4/src/Compositor.cpp
+@@ -25,6 +25,10 @@
+ #include "state/MonitorState.hpp"
+ #include "state/WorkspaceState.hpp"
  #include <aquamarine/output/Output.hpp>
 +#include <fcntl.h>
 +#include <poll.h>
 +#include <unistd.h>
 +#include <wayland-server-core.h>
- #include <bit>
  #include <ctime>
  #include <random>
-@@ -52,6 +56,8 @@
+ #include <print>
+@@ -42,6 +46,8 @@
+ #include "helpers/env/Env.hpp"
+ #include "protocols/SecurityContext.hpp"
  #include "protocols/ColorManagement.hpp"
- #include "protocols/core/Compositor.hpp"
- #include "protocols/core/Subcompositor.hpp"
 +#include "protocols/core/DataDevice.hpp"
 +#include <aquamarine/backend/AnlandBackend.hpp>
- #include "desktop/view/LayerSurface.hpp"
- #include "layout/space/Space.hpp"
  #include "render/Renderer.hpp"
-@@ -95,9 +101,67 @@
+ #include "xwayland/XWayland.hpp"
+ #include "helpers/ByteOperations.hpp"
+@@ -77,6 +83,7 @@
+ #include <sys/resource.h>
+ #include <sys/ioctl.h>
  #include <malloc.h>
++#include <xkbcommon/xkbcommon.h>
  #include <unistd.h>
  #include <xf86drm.h>
-+#include <xkbcommon/xkbcommon.h>
+ 
+@@ -86,6 +93,63 @@
  
  using namespace Hyprutils::String;
  using namespace Aquamarine;
@@ -94,7 +101,7 @@ index f9ef1a3..b4239cc 100644
  using enum NContentType::eContentType;
  using namespace NColorManagement;
  using namespace Desktop::View;
-@@ -314,9 +378,12 @@ void CCompositor::initServer(std::string socketName, int socketFd) {
+@@ -311,9 +375,12 @@ void CCompositor::initServer(std::string
  
      std::vector<Aquamarine::SBackendImplementationOptions> implementations;
      Aquamarine::SBackendImplementationOptions              option;
@@ -108,7 +115,7 @@ index f9ef1a3..b4239cc 100644
      option.backendType        = Aquamarine::eBackendType::AQ_BACKEND_DRM;
      option.backendRequestMode = Aquamarine::eBackendRequestMode::AQ_BACKEND_REQUEST_IF_AVAILABLE;
      implementations.emplace_back(option);
-@@ -428,6 +495,9 @@ void CCompositor::initServer(std::string socketName, int socketFd) {
+@@ -425,6 +492,9 @@ void CCompositor::initServer(std::string
  
      initManagers(STAGE_BASICINIT);
  
@@ -117,11 +124,11 @@ index f9ef1a3..b4239cc 100644
 +
      initManagers(STAGE_LATE);
  
-     for (auto const& o : pendingOutputs) {
-@@ -463,6 +533,186 @@ void CCompositor::initAllSignals() {
+     m_listeners.lock = g_pSessionLockManager->m_events.lock.listen([this] {
+@@ -471,6 +541,186 @@ void CCompositor::initAllSignals() {
+         g_pInputManager->newMouse(dev);
          g_pInputManager->updateCapabilities();
      });
- 
 +    // ── Anland clipboard relay ─────────────────────────────────────
 +    // Bidirectional clipboard sync between Linux Wayland apps and the
 +    // Android consumer, mirroring KWin's AnlandBackend clipboard handling.
@@ -302,10 +309,10 @@ index f9ef1a3..b4239cc 100644
 +        };
 +    }
 +
-     m_aqBackend->events.newSwitch.listenStatic([](const SP<Aquamarine::ISwitch>& dev) {
-         Log::logger->log(Log::DEBUG, "New aquamarine switch with name {}", dev->getName());
-         g_pInputManager->newSwitch(dev);
-@@ -619,6 +869,75 @@ void CCompositor::cleanup() {
+ 
+     m_aqBackend->events.newKeyboard.listenStatic([](const SP<Aquamarine::IKeyboard>& dev) {
+         Log::logger->log(Log::DEBUG, "New aquamarine keyboard with name {}", dev->getName());
+@@ -643,6 +893,75 @@ void CCompositor::cleanup() {
      wl_display_destroy(m_wlDisplay);
  }
  
@@ -314,8 +321,8 @@ index f9ef1a3..b4239cc 100644
 + * UTF-8 preferred) synchronously via a pipe and forwards it to the Android
 + * consumer. Loop guards mirroring KWin/mutter:
 + *   - our own CAnlandClipboardSource (set from the consumer) is skipped;
-+ *   - identical text is skipped (cache);
-+ *   - fallback (consumer disconnected) is skipped. */
++   *   - identical text is skipped (cache);
++   *   - fallback (consumer disconnected) is skipped. */
 +void CCompositor::onAnlandSelectionChanged() {
 +    if (!m_pAnlandBackend || m_pAnlandBackend->inFallback())
 +        return;
@@ -381,55 +388,40 @@ index f9ef1a3..b4239cc 100644
  void CCompositor::initManagers(eManagersInitStage stage) {
      switch (stage) {
          case STAGE_PRIORITY: {
-@@ -3269,4 +3588,4 @@ std::optional<unsigned int> CCompositor::getVTNr() {
- 
- bool CCompositor::isVRRActiveOnAnyMonitor() const {
-     return std::ranges::any_of(m_monitors, [](const PHLMONITOR& m) { return m->m_vrrActive; });
--}
-+}
-\ No newline at end of file
-diff --git a/src/Compositor.hpp b/src/Compositor.hpp
-index 9847335..2fa1995 100644
---- a/src/Compositor.hpp
-+++ b/src/Compositor.hpp
-@@ -13,6 +13,7 @@
- #include "config/shared/workspace/WorkspaceRule.hpp"
+Index: anland-quilt4/src/Compositor.hpp
+===================================================================
+--- anland-quilt4.orig/src/Compositor.hpp
++++ anland-quilt4/src/Compositor.hpp
+@@ -17,6 +17,7 @@
+ #include "helpers/cm/ColorManagement.hpp"
  
  #include <aquamarine/backend/Backend.hpp>
 +#include <aquamarine/backend/AnlandBackend.hpp>
  #include <aquamarine/output/Output.hpp>
  
  class CWLSurfaceResource;
-@@ -64,6 +65,7 @@ class CCompositor {
-     std::unordered_map<std::string, WORKSPACEID> m_seenMonitorWorkspaceMap; // map of seen monitor names to workspace IDs
+@@ -67,6 +68,7 @@ class CCompositor {
+     bool                     setWatchdogFd(int fd);
+     bool                     writeWatchdogFd(std::string);
  
-     void                                         initServer(std::string socketName, int socketFd);
-+    void                                         onAnlandSelectionChanged();
-     void                                         startCompositor();
-     void                                         stopCompositor();
-     void                                         cleanup();
-@@ -178,6 +180,7 @@ class CCompositor {
- 
-   private:
-     void                           initAllSignals();
-+
-     void                           removeAllSignals();
-     void                           cleanEnvironment();
-     void                           setRandomSplash();
-@@ -194,6 +197,9 @@ class CCompositor {
-     Hyprutils::OS::CFileDescriptor m_watchdogWriteFd;
- 
-     std::vector<PHLWORKSPACEREF>   m_workspaces;
++    void                     onAnlandSelectionChanged();
+     bool                     m_sessionActive          = true;
+     bool                     m_dpmsStateOn            = true;
+     bool                     m_isShuttingDown         = false;
+@@ -102,6 +104,9 @@ class CCompositor {
+     uint64_t                       m_hyprlandPID    = 0;
+     wl_event_source*               m_critSigSource  = nullptr;
+     rlimit                         m_originalNofile = {};
 +
 +    Aquamarine::CAnlandBackend*    m_pAnlandBackend      = nullptr;
 +    std::string                    m_anlandClipboardText;
- };
+     Hyprutils::OS::CFileDescriptor m_watchdogWriteFd;
  
- inline UP<CCompositor> g_pCompositor;
-diff --git a/src/main.cpp b/src/main.cpp
-index 9d65ce2..50ddf0c 100644
---- a/src/main.cpp
-+++ b/src/main.cpp
+     struct {
+Index: anland-quilt4/src/main.cpp
+===================================================================
+--- anland-quilt4.orig/src/main.cpp
++++ anland-quilt4/src/main.cpp
 @@ -32,6 +32,7 @@ static void help() {
      --socket NAME                - Sets the Wayland socket name (for Wayland socket handover)
      --wayland-fd FD              - Sets the Wayland socket fd (for Wayland socket handover)
@@ -438,7 +430,7 @@ index 9d65ce2..50ddf0c 100644
      --safe-mode                  - Starts Hyprland in safe mode
      --systeminfo                 - Prints system infos
      --i-am-really-stupid         - Omits root user privileges check (why would you do that?)
-@@ -161,6 +162,9 @@ int main(int argc, char** argv) {
+@@ -163,6 +164,9 @@ int main(int argc, char** argv) {
              } else if (value == "--safe-mode") {
                  safeMode = true;
                  continue;
@@ -448,18 +440,11 @@ index 9d65ce2..50ddf0c 100644
              } else if (value == "--watchdog-fd") {
                  if (std::next(it) == args.end()) {
                      help();
-@@ -280,4 +284,4 @@ int main(int argc, char** argv) {
-     Log::logger->log(Log::DEBUG, "Hyprland has reached the end.");
- 
-     return EXIT_SUCCESS;
--}
-+}
-\ No newline at end of file
-diff --git a/src/managers/SeatManager.cpp b/src/managers/SeatManager.cpp
-index f2e1ff7..fff4868 100644
---- a/src/managers/SeatManager.cpp
-+++ b/src/managers/SeatManager.cpp
-@@ -584,6 +584,11 @@ void CSeatManager::setCurrentSelection(SP<IDataSource> source) {
+Index: anland-quilt4/src/managers/SeatManager.cpp
+===================================================================
+--- anland-quilt4.orig/src/managers/SeatManager.cpp
++++ anland-quilt4/src/managers/SeatManager.cpp
+@@ -656,6 +656,11 @@ void CSeatManager::setCurrentSelection(S
      }
  
      m_events.setSelection.emit();

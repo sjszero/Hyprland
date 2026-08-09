@@ -1,12 +1,13 @@
-From: Anland Hyprland Maintainers
+From: Anland Hyprland Maintainers <anland@example.invalid>
 Date: Thu, 7 Aug 2026 13:00:00 +0800
 Subject: start: provide Anland audio session launcher
 
-diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4d83b5c..c92d2ee 100644
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -612,6 +612,9 @@ set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+---
+Index: anland-quilt4/CMakeLists.txt
+===================================================================
+--- anland-quilt4.orig/CMakeLists.txt
++++ anland-quilt4/CMakeLists.txt
+@@ -671,6 +671,9 @@ set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERM
  
  # binary and symlink
  install(TARGETS Hyprland)
@@ -16,11 +17,10 @@ index 4d83b5c..c92d2ee 100644
  
  install(
    CODE "execute_process( \
-diff --git a/scripts/start-hyprland-anland b/scripts/start-hyprland-anland
-new file mode 100755
-index 0000000..efe8341
+Index: anland-quilt4/scripts/start-hyprland-anland
+===================================================================
 --- /dev/null
-+++ b/scripts/start-hyprland-anland
++++ anland-quilt4/scripts/start-hyprland-anland
 @@ -0,0 +1,65 @@
 +#!/bin/sh
 +# Anland session launcher for the Debian-patched Hyprland build.
@@ -87,4 +87,4 @@ index 0000000..efe8341
 +hyprland_pid=$!
 +wait "$hyprland_pid"
 +exit $?
-\ No newline at end of file
+\ 文件末尾没有换行符

@@ -1,12 +1,16 @@
-From: Anland Hyprland Maintainers
+From: Anland Hyprland Maintainers <anland@example.invalid>
 Date: Thu, 7 Aug 2026 13:00:00 +0800
-Subject: render: drop hot-path swapchain log and normalize EGL sync source
+Subject: render: drop hot-path swapchain debug log
 
-diff --git a/src/helpers/Monitor.cpp b/src/helpers/Monitor.cpp
-index 5d1a7ef..dcb3294 100644
---- a/src/helpers/Monitor.cpp
-+++ b/src/helpers/Monitor.cpp
-@@ -2602,7 +2602,7 @@ void CMonitorState::ensureBufferPresent() {
+Drops the per-frame DEBUG log in CMonitorState::ensureBufferPresent() to reduce
+hot-path overhead in Anland sessions.
+
+---
+Index: anland-quilt4/src/output/Monitor.cpp
+===================================================================
+--- anland-quilt4.orig/src/output/Monitor.cpp
++++ anland-quilt4/src/output/Monitor.cpp
+@@ -2664,7 +2664,7 @@ void CMonitorState::ensureBufferPresent(
  
      // this is required for modesetting being possible and might be missing in case of first tests in the renderer
      // where we test modes and buffers
@@ -15,14 +19,3 @@ index 5d1a7ef..dcb3294 100644
      m_owner->m_output->state->setBuffer(m_owner->m_output->swapchain->next(nullptr));
      m_owner->m_output->swapchain->rollback(); // restore the counter, don't advance the swapchain
  }
-diff --git a/src/render/OpenGL.cpp b/src/render/OpenGL.cpp
-index 40ac0cb..5a2814a 100644
---- a/src/render/OpenGL.cpp
-+++ b/src/render/OpenGL.cpp
-@@ -2641,4 +2641,4 @@ CEGLSync::~CEGLSync() {
- 
- bool CEGLSync::isValid() {
-     return m_valid && m_sync != EGL_NO_SYNC_KHR && m_fd.isValid();
--}
-+}
-\ No newline at end of file
