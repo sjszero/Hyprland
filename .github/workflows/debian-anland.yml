@@ -24,21 +24,29 @@ jobs:
           # full history on the ARM runner.
           fetch-depth: 1
 
-      - name: Configure official DMS repository and build dependencies
+      - name: Configure official DMS runtime repositories and build dependencies
         run: |
           export DEBIAN_FRONTEND=noninteractive
           # debian:forky is intentionally minimal; curl is needed before the
-          # AvengeMedia key can be downloaded.
+          # AvengeMedia keys can be downloaded.
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl
           install -d -m 0755 /etc/apt/keyrings
           curl --fail --location --retry 3 --output /etc/apt/keyrings/avengemedia-dms.asc \
             https://download.opensuse.org/repositories/home:/AvengeMedia:/dms/Debian_Unstable/Release.key
+          curl --fail --location --retry 3 --output /etc/apt/keyrings/avengemedia-danklinux.asc \
+            https://download.opensuse.org/repositories/home:/AvengeMedia:/danklinux/Debian_Unstable/Release.key
           cat > /etc/apt/sources.list.d/avengemedia-dms.sources <<'EOF'
           Types: deb
           URIs: https://download.opensuse.org/repositories/home:/AvengeMedia:/dms/Debian_Unstable/
           Suites: /
           Signed-By: /etc/apt/keyrings/avengemedia-dms.asc
+          EOF
+          cat > /etc/apt/sources.list.d/avengemedia-danklinux.sources <<'EOF'
+          Types: deb
+          URIs: https://download.opensuse.org/repositories/home:/AvengeMedia:/danklinux/Debian_Unstable/
+          Suites: /
+          Signed-By: /etc/apt/keyrings/avengemedia-danklinux.asc
           EOF
           apt-get update
           apt-get install -y --no-install-recommends \
@@ -84,12 +92,13 @@ jobs:
         run: |
           host_arch=$(dpkg --print-architecture)
           test "$host_arch" = arm64
-          test -f "artifacts/hyprland_0.55.4+ds-2_${host_arch}.deb"
+          test "$(find artifacts -maxdepth 1 -type f -name "hyprland_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "dms_*_${host_arch}.deb" | wc -l)" -eq 1
-          test -f "artifacts/hyprland-anland-desktop_0.55.4+ds-2_${host_arch}.deb"
-          test -f "artifacts/libaquamarine11_0.12.1-1_${host_arch}.deb"
+          test "$(find artifacts -maxdepth 1 -type f -name "hyprland-anland-desktop_*_${host_arch}.deb" | wc -l)" -eq 1
+          test "$(find artifacts -maxdepth 1 -type f -name "libaquamarine11_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "xwayland_*_${host_arch}.deb" | wc -l)" -ge 1
           test "$(find artifacts -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 5
+          test -x install-anland-desktop.sh
 
       - name: Upload selected Debian packages
         uses: actions/upload-artifact@v4
@@ -101,9 +110,10 @@ jobs:
           retention-days: 14
           compression-level: 0
           path: |
-            artifacts/hyprland_0.55.4+ds-2_arm64.deb
+            artifacts/hyprland_*_arm64.deb
             artifacts/dms_*_arm64.deb
-            artifacts/hyprland-anland-desktop_0.55.4+ds-2_arm64.deb
-            artifacts/libaquamarine11_0.12.1-1_arm64.deb
+            artifacts/hyprland-anland-desktop_*_arm64.deb
+            artifacts/libaquamarine11_*_arm64.deb
             artifacts/xwayland_*_arm64.deb
             artifacts/SHA256SUMS
+            install-anland-desktop.sh

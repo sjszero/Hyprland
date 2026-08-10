@@ -65,7 +65,7 @@ Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
  polkitd, binutils, libgl1-mesa-dri,
  pipewire, pipewire-pulse, wireplumber, dbus-user-session,
- policykit-1, network-manager, acl
+ network-manager, acl
 Provides: ${hyprland:Provides}
 Recommends:
  libcap2-bin,

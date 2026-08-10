@@ -98,15 +98,18 @@ download_official_dms() {
     dms_workdir="$stage/dms-download"
     rm -rf "$dms_workdir"
     mkdir -p "$dms_workdir"
+
+    # Download only the official DMS package. Its runtime dependencies remain
+    # owned by AvengeMedia/Debian APT repositories and are resolved by
+    # install-anland-desktop.sh on the target machine.
     (
         cd "$dms_workdir"
-        # Download only: the official package and its dependency metadata remain
-        # owned by AvengeMedia's APT repository, not this source package.
         apt-get download dms
     )
-    dms_deb=$(find "$dms_workdir" -maxdepth 1 -type f -name "dms_*_${deb_arch}.deb" -print | head -n 1)
+    dms_deb=$(find "$dms_workdir" -maxdepth 1 -type f \
+        -name "dms_*_${deb_arch}.deb" -print | head -n 1)
     if [ -z "$dms_deb" ]; then
-        echo "build-anland: official dms ARM64 package was not downloaded; configure the AvengeMedia DMS APT source" >&2
+        echo "build-anland: official dms ARM64 package was not downloaded; configure the AvengeMedia DMS source" >&2
         return 2
     fi
     cp -f "$dms_deb" "$root/artifacts/"
@@ -268,7 +271,10 @@ download_official_dms
 # Android GPU path. It is a separate Debian source package, built by the same
 # apt-source/build-dep/patch/dpkg-buildpackage flow as anland-main's producer.
 build_anland_xwayland
-sha256sum "$root/artifacts"/*.deb > "$root/artifacts/SHA256SUMS"
+(
+    cd "$root/artifacts"
+    sha256sum ./*.deb > SHA256SUMS
+)
 if [ "$cache_enabled" -eq 1 ]; then
     ccache --show-stats
 fi

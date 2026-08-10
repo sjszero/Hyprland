@@ -13,6 +13,7 @@ hyprland.pc
 _deps
 
 build/
+artifacts/
 result*
 /.pre-commit-config.yaml
 /.vscode/
