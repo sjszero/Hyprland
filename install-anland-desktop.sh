@@ -26,7 +26,6 @@ find_one() {
 }
 
 hyprland_deb=$(find_one 'hyprland_*_arm64.deb')
-dms_deb=$(find_one 'dms_*_arm64.deb')
 desktop_deb=$(find_one 'hyprland-anland-desktop_*_arm64.deb')
 aquamarine_deb=$(find_one 'libaquamarine11_*_arm64.deb')
 xwayland_deb=$(find_one 'xwayland_*_arm64.deb')
@@ -69,7 +68,6 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     "$aquamarine_deb" \
     "$hyprland_deb" \
     "$xwayland_deb" \
-    "$dms_deb" \
     "$desktop_deb"
 
 echo "Anland Hyprland desktop installed. Start it with: start-hyprland-anland"

@@ -79,6 +79,9 @@ if [ "${ANLAND_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
     # itself is copied to a fresh /tmp directory for every build, so using the
     # workspace path here prevents cache keys from matching staged sources.
     export CCACHE_COMPILERCHECK=content
+    # Debian's generated build flags contain the absolute staging path. Strip
+    # it from preprocessor output as well as the usual debug-path rewrite.
+    export CCACHE_BASEDIR
     export CCACHE_NOHASHDIR=true
     export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}"
     mkdir -p "$CCACHE_DIR"
@@ -94,30 +97,13 @@ fi
 # Xwayland is mandatory for the Anland desktop because its kgsl/turnip patch
 # enables accelerated X11 clients.  Keep the patch upstream rather than
 # vendoring it: this mirrors anland-main's producer approach.
-download_official_dms() {
-    dms_workdir="$stage/dms-download"
-    rm -rf "$dms_workdir"
-    mkdir -p "$dms_workdir"
-
-    # Download only the official DMS package. Its runtime dependencies remain
-    # owned by AvengeMedia/Debian APT repositories and are resolved by
-    # install-anland-desktop.sh on the target machine.
-    (
-        cd "$dms_workdir"
-        apt-get download dms
-    )
-    dms_deb=$(find "$dms_workdir" -maxdepth 1 -type f \
-        -name "dms_*_${deb_arch}.deb" -print | head -n 1)
-    if [ -z "$dms_deb" ]; then
-        echo "build-anland: official dms ARM64 package was not downloaded; configure the AvengeMedia DMS source" >&2
-        return 2
-    fi
-    cp -f "$dms_deb" "$root/artifacts/"
-}
-
 build_anland_xwayland() {
 
-    xwayland_workdir="${XWAYLAND_WORKDIR:-$root/.cache/xwayland-anland-build}"
+    # Keep Xwayland under the same per-build staging root as Aquamarine and
+    # Hyprland.  CCACHE_BASEDIR is that root, so all three projects receive
+    # stable relative compiler paths across CI runs.  The old $root/.cache
+    # default was outside CCACHE_BASEDIR and made Xwayland a full cache miss.
+    xwayland_workdir="${XWAYLAND_WORKDIR:-$stage/xwayland-anland-build}"
     xwayland_patch="$xwayland_workdir/xwayland.patch"
     xwayland_url="${XWAYLAND_PATCH_URL:-https://raw.githubusercontent.com/superturtlee/anland/main/producers/kde/Debian13_v5/xwayland.patch}"
 
@@ -187,14 +173,16 @@ build_anland_xwayland() {
     cp -f "$xwayland_deb" "$root/artifacts/"
 }
 
-stage=
-stage=$(mktemp -d "${TMPDIR:-/tmp}/anland-build.XXXXXX")
+# Use a stable native staging path. Debian-generated compiler flags can embed
+# this root, so a random mktemp suffix prevents ccache direct hits even when
+# CCACHE_BASEDIR is set. The workspace itself is not used because Android/FUSE
+# mounts can reject chmod during dpkg builds.
+stage="${ANLAND_STAGE_DIR:-${TMPDIR:-/tmp}/anland-build-staging}"
+rm -rf "$stage"
+mkdir -p "$stage"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM
 
-# Normalise the per-build /tmp path for ccache.  Without this, each fresh
-# staging directory becomes part of the compiler input path and turns every CI
-# run into a cold cache miss.
 if [ "$cache_enabled" -eq 1 ]; then
     export CCACHE_BASEDIR="$stage"
 fi
@@ -264,16 +252,25 @@ for package in \
     fi
     cp -f "$package" "$root/artifacts/"
 done
-# Download the official DMS package from the AvengeMedia source configured by
-# the host or CI. Do not install, unpack, or repackage it here.
-download_official_dms
+# DMS is installed by install-anland-desktop.sh from its official APT source.
+# Keep the build artifact focused on the locally built Debian packages.
 # Xwayland needs the matching kgsl/turnip patch for X11 clients to use the
 # Android GPU path. It is a separate Debian source package, built by the same
 # apt-source/build-dep/patch/dpkg-buildpackage flow as anland-main's producer.
 build_anland_xwayland
+# Ship the installer alongside the packages so a downloaded CI artifact is
+# self-contained.  Explicit chmod also protects against source mounts that do
+# not preserve executable bits.
+install_script="$root/install-anland-desktop.sh"
+if [ ! -f "$install_script" ]; then
+    echo "build-anland: missing artifact installer: $install_script" >&2
+    exit 2
+fi
+cp -f "$install_script" "$root/artifacts/install-anland-desktop.sh"
+chmod 0755 "$root/artifacts/install-anland-desktop.sh"
 (
     cd "$root/artifacts"
-    sha256sum ./*.deb > SHA256SUMS
+    sha256sum ./*.deb ./install-anland-desktop.sh > SHA256SUMS
 )
 if [ "$cache_enabled" -eq 1 ]; then
     ccache --show-stats
