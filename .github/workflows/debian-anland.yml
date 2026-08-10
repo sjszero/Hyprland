@@ -61,9 +61,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v2-${{ hashFiles('CMakeLists.txt', 'src/**', 'protocols/**', 'scripts/**', 'debian/**', 'aquamarine-0.12.1/**') }}
+          # Key compiler-input changes only.  Hashing all debian/** and the full
+          # Aquamarine tree created a new cache namespace for changelogs,
+          # control metadata, and other packaging-only edits.
+          key: ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v3-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'protocols/**', 'scripts/**', 'debian/patches/**', 'aquamarine-0.12.1/CMakeLists.txt', 'aquamarine-0.12.1/src/**', 'aquamarine-0.12.1/include/**', 'aquamarine-0.12.1/protocols/**', 'aquamarine-0.12.1/debian/patches/**') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v2-
+            ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v3-
             ${{ runner.os }}-${{ runner.arch }}-forky-ccache-
 
       - name: Prepare unprivileged builder

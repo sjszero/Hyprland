@@ -75,7 +75,9 @@ export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-parallel=2}"
 # be reused.  Set ANLAND_CCACHE=0 to disable, or override CCACHE_DIR.
 if [ "${ANLAND_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
     export CCACHE_DIR="${CCACHE_DIR:-$root/.cache/ccache}"
-    export CCACHE_BASEDIR="$root"
+    # CCACHE_BASEDIR is set to the native staging tree below.  The workspace
+    # itself is copied to a fresh /tmp directory for every build, so using the
+    # workspace path here prevents cache keys from matching staged sources.
     export CCACHE_COMPILERCHECK=content
     export CCACHE_NOHASHDIR=true
     export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}"
@@ -130,16 +132,14 @@ build_anland_xwayland() {
         sudo find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.sources' \
             -exec sed -i 's/^[[:space:]]*Types:[[:space:]]*deb$/Types: deb deb-src/' {} +
 
-        xwayland_sources=$(mktemp)
+        # Write traditional-source output directly as root.  A temporary file made
+        # by the unprivileged builder may be unreadable to a rootless/container
+        # sudo implementation.
         sudo sh -c '
             grep -rhsE "^[[:space:]]*deb[[:space:]]+" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
                 | sed "s/^[[:space:]]*deb[[:space:]]\\+/deb-src /" \
-                > "$1"
-        ' sh "$xwayland_sources"
-        if [ -s "$xwayland_sources" ]; then
-            sudo install -m 0644 "$xwayland_sources" /etc/apt/sources.list.d/anland-xwayland-deb-src.list
-        fi
-        rm -f "$xwayland_sources"
+                > /etc/apt/sources.list.d/anland-xwayland-deb-src.list
+        '
 
         if ! sudo grep -rqsE '^[[:space:]]*Types:[[:space:]].*deb-src|^[[:space:]]*deb-src[[:space:]]+' \
                 /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
@@ -188,6 +188,13 @@ stage=
 stage=$(mktemp -d "${TMPDIR:-/tmp}/anland-build.XXXXXX")
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM
+
+# Normalise the per-build /tmp path for ccache.  Without this, each fresh
+# staging directory becomes part of the compiler input path and turns every CI
+# run into a cold cache miss.
+if [ "$cache_enabled" -eq 1 ]; then
+    export CCACHE_BASEDIR="$stage"
+fi
 
 cp -a "$root/." "$stage/"
 # The mounted workspace may preserve stale executable bits on debhelper
