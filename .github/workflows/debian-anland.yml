@@ -75,7 +75,7 @@ jobs:
 
       - name: Build Aquamarine and Hyprland
         run: |
-          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && DEB_BUILD_OPTIONS=parallel=2 ./build-anland.sh"
+          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && DEB_BUILD_OPTIONS=parallel=$(nproc) ./build-anland.sh"
 
       - name: Verify selected packages
         run: |
