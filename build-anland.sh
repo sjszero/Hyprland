@@ -242,16 +242,22 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
 # packages are deliberately left in the temporary build directory and removed on exit.
 mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
-for package in \
-    "$(dirname "$stage")"/hyprland_0.55.4+ds-2_"$deb_arch".deb \
-     "$(dirname "$stage")"/hyprland-anland-desktop_0.55.4+ds-2_"$deb_arch".deb \
-     "$stage"/libaquamarine11_0.12.1-1_"$deb_arch".deb; do
-    if [ ! -f "$package" ]; then
-        echo "build-anland: expected package was not produced: $package" >&2
+copy_one_deb() {
+    pattern=$1
+    package=$(find "$(dirname "$stage")" "$stage" -maxdepth 1 -type f \
+        -name "$pattern" -print | head -n 1)
+    if [ -z "$package" ]; then
+        echo "build-anland: expected package was not produced: $pattern" >&2
         exit 2
     fi
     cp -f "$package" "$root/artifacts/"
-done
+}
+
+# Do not bake upstream versions into artifact collection. The Debian changelog
+# determines the package version, so a future source refresh remains coherent.
+copy_one_deb "hyprland_*_${deb_arch}.deb"
+copy_one_deb "hyprland-anland-desktop_*_${deb_arch}.deb"
+copy_one_deb "libaquamarine11_*_${deb_arch}.deb"
 # DMS is installed by install-anland-desktop.sh from its official APT source.
 # Keep the build artifact focused on the locally built Debian packages.
 # Xwayland needs the matching kgsl/turnip patch for X11 clients to use the

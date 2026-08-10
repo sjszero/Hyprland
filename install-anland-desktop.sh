@@ -3,6 +3,8 @@
 # Anland Hyprland artifact set. Run from the artifact directory, or pass it as
 # the first argument:
 #   ./install-anland-desktop.sh /path/to/anland-debian-packages-arm64
+# The artifact contains only locally built Hyprland-side packages. DMS and the
+# complete official runtime are resolved from AvengeMedia/Debian APT sources.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -64,10 +66,22 @@ Signed-By: /etc/apt/keyrings/avengemedia-danklinux.asc
 EOF
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+# Install the locally built compositor stack and the complete set of official
+# Hyprland session components used by a normal DMS/Hyprland desktop. DMS is not
+# carried in the artifact: the metapackage dependency resolves dms itself, and
+# its complete runtime closure, from the AvengeMedia repositories above.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     "$aquamarine_deb" \
     "$hyprland_deb" \
     "$xwayland_deb" \
-    "$desktop_deb"
+    "$desktop_deb" \
+    hypridle \
+    hyprlock \
+    hyprpaper \
+    hyprpicker \
+    hyprpolkitagent \
+    hyprsunset \
+    xdg-desktop-portal-hyprland \
+    xdg-desktop-portal-gtk
 
 echo "Anland Hyprland desktop installed. Start it with: start-hyprland-anland"
