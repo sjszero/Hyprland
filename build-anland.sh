@@ -89,6 +89,69 @@ else
     cache_enabled=0
 fi
 
+# Xwayland is mandatory for the Anland desktop because its kgsl/turnip patch
+# enables accelerated X11 clients.  Keep the patch upstream rather than
+# vendoring it: this mirrors anland-main's producer approach.
+build_anland_xwayland() {
+    xwayland_workdir="${XWAYLAND_WORKDIR:-$root/.cache/xwayland-anland-build}"
+    xwayland_patch="$xwayland_workdir/xwayland.patch"
+    xwayland_url="${XWAYLAND_PATCH_URL:-https://raw.githubusercontent.com/superturtlee/anland/main/producers/kde/Debian13_v5/xwayland.patch}"
+
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo "build-anland: curl or wget is required to fetch xwayland.patch" >&2
+        return 2
+    fi
+
+    # Same source-repository activation logic as
+    # anland-main/producers/kde/Debian13_v5/build.sh.  Do not add or pin a
+    # forky source here: use the distribution source configured by the host.
+    if ! sudo grep -rqsE '^Types:.*deb-src|^deb-src ' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+        echo "build-anland: enabling deb-src repositories for Xwayland" >&2
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Types: deb$/Types: deb deb-src/' \
+                /etc/apt/sources.list.d/ubuntu.sources
+        elif [ -f /etc/apt/sources.list ]; then
+            sudo sed -i 's/^deb \(.*\)$/deb \1\ndeb-src \1/' /etc/apt/sources.list
+        fi
+    fi
+    sudo apt-get update -qq || echo "build-anland: apt-get update reported issues" >&2
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get build-dep -y xwayland
+
+    rm -rf "$xwayland_workdir"
+    mkdir -p "$xwayland_workdir"
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --location --retry 3 --output "$xwayland_patch" "$xwayland_url"
+    else
+        wget -O "$xwayland_patch" "$xwayland_url"
+    fi
+    [ -s "$xwayland_patch" ]
+
+    (
+        cd "$xwayland_workdir"
+        apt-get source xwayland
+    )
+    xwayland_tree=$(find "$xwayland_workdir" -mindepth 1 -maxdepth 1 -type d -name 'xwayland-*' -print | head -n 1)
+    [ -n "$xwayland_tree" ]
+    if (
+        cd "$xwayland_tree" && patch --batch --forward --reject-file=- -p1 < "$xwayland_patch"
+    ); then
+        :
+    elif grep -rqF 'No usable linux-dmabuf main device' "$xwayland_tree/hw/xwayland" 2>/dev/null; then
+        echo "build-anland: Xwayland patch already present; continuing" >&2
+    else
+        echo "build-anland: xwayland.patch does not apply to host source" >&2
+        return 2
+    fi
+    (
+        cd "$xwayland_tree"
+        DEB_BUILD_OPTIONS="nocheck ${DEB_BUILD_OPTIONS}" dpkg-buildpackage -b -uc -us -d
+    )
+    xwayland_deb=$(find "$xwayland_workdir" -maxdepth 1 -type f -name "xwayland_*_${deb_arch}.deb" -print | head -n 1)
+    [ -n "$xwayland_deb" ]
+    cp -f "$xwayland_deb" "$root/artifacts/"
+}
+
 stage=
 stage=$(mktemp -d "${TMPDIR:-/tmp}/anland-build.XXXXXX")
 cleanup() { rm -rf "$stage"; }
@@ -102,6 +165,7 @@ cp -a "$root/." "$stage/"
 # control files as shell scripts.
 find "$stage/debian" "$stage/aquamarine-0.12.1/debian" -type f -exec chmod -x {} + 2>/dev/null || true
 chmod +x "$stage/debian/rules" "$stage/aquamarine-0.12.1/debian/rules" \
+    "$stage/debian/anland/dms/start-anland-dms" \
     "$stage/aquamarine-0.12.1/data/hwdata.sh" \
     "$stage/scripts/generateShaderIncludes.sh"
 
@@ -151,6 +215,8 @@ mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
 for package in \
     "$(dirname "$stage")"/hyprland_0.55.4+ds-2_"$deb_arch".deb \
+    "$(dirname "$stage")"/hyprland-anland-dms_0.55.4+ds-2_"$deb_arch".deb \
+    "$(dirname "$stage")"/hyprland-anland-desktop_0.55.4+ds-2_"$deb_arch".deb \
     "$stage"/libaquamarine11_0.12.1-1_"$deb_arch".deb; do
     if [ ! -f "$package" ]; then
         echo "build-anland: expected package was not produced: $package" >&2
@@ -158,6 +224,10 @@ for package in \
     fi
     cp -f "$package" "$root/artifacts/"
 done
+# Xwayland needs the matching kgsl/turnip patch for X11 clients to use the
+# Android GPU path.  It is a separate Debian source package, built by the same
+# apt-source/build-dep/patch/dpkg-buildpackage flow as anland-main's producer.
+build_anland_xwayland
 sha256sum "$root/artifacts"/*.deb > "$root/artifacts/SHA256SUMS"
 if [ "$cache_enabled" -eq 1 ]; then
     ccache --show-stats

@@ -1,0 +1,8 @@
+debian/anland/dms/bin/dms usr/lib/hyprland-anland/dms/bin/
+debian/anland/dms/bin/quickshell usr/lib/hyprland-anland/dms/bin/
+debian/anland/dms/bin/danksearch usr/lib/hyprland-anland/dms/bin/
+debian/anland/dms/bin/dgop usr/lib/hyprland-anland/dms/bin/
+debian/anland/dms/bin/matugen usr/lib/hyprland-anland/dms/bin/
+debian/anland/dms/start-anland-dms usr/bin/
+debian/anland/dms/dms usr/share/quickshell/
+debian/anland/dms/settings.json usr/share/hyprland-anland/dms/

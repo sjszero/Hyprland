@@ -1,0 +1,32 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Sun, 10 Aug 2026 07:00:00 +0800
+Subject: start: launch bundled DMS automatically
+
+The Anland desktop package provides start-anland-dms. Start it for every
+Anland session; the helper waits for Hyprland IPC and Wayland sockets and
+then launches DMS with the correct Hyprland environment.
+
+---
+--- anland-quilt4.orig/scripts/start-hyprland-anland
++++ anland-quilt4/scripts/start-hyprland-anland
+@@ -51,11 +51,10 @@
+-# DMS is opt-in.  The dedicated launcher is responsible for its user/runtime
+-# isolation and waits for the Wayland socket after Hyprland creates it.
+-if [ "${ANLAND_DMS:-0}" = 1 ]; then
+-    if command -v start-anland-dms >/dev/null 2>&1; then
+-        start-anland-dms >/dev/null 2>&1 &
+-        children="$children $!"
+-    else
+-        echo "start-hyprland-anland: ANLAND_DMS=1 but start-anland-dms is unavailable" >&2
+-    fi
++# DMS is supplied by the Anland desktop companion package. Its launcher waits
++# for Hyprland's instance and Wayland sockets, so it is safe to start before
++# the compositor creates them.
++if command -v start-anland-dms >/dev/null 2>&1; then
++    start-anland-dms >/dev/null 2>&1 &
++    children="$children $!"
++elif [ "${ANLAND_DMS:-1}" != 0 ]; then
++    echo "start-hyprland-anland: DMS package is unavailable; starting compositor only" >&2
+ fi
+ 
+ /usr/bin/start-hyprland --anland "$@" &

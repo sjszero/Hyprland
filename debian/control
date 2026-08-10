@@ -63,12 +63,15 @@ Package: hyprland
 Architecture: any
 Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
- polkitd, binutils, libgl1-mesa-dri
+ polkitd, binutils, libgl1-mesa-dri,
+ pipewire, pipewire-pulse, wireplumber, dbus-user-session,
+ policykit-1, network-manager, acl
 Provides: ${hyprland:Provides}
 Recommends:
  libcap2-bin,
  xwayland,
  xdg-desktop-portal-hyprland,
+ hyprland-anland-dms
 Description: Dynamic tiling Wayland compositor
  Hyprland is a 100% independent, dynamic tiling Wayland compositor that doesn't
  sacrifice on its looks.
@@ -94,6 +97,53 @@ Description: Dynamic tiling Wayland compositor
   - Powerful window/monitor/layer rules
   - Socket-based IPC
   - Native IME and Input Panels Support
+
+Package: hyprland-anland-dms
+Architecture: arm64
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${shlibs:Depends},
+ hyprland (>= ${source:Version}), hyprland (<< ${source:Version}.),
+ pipewire, pipewire-pulse, wireplumber, dbus-user-session,
+ policykit-1, network-manager, acl,
+ qt6-wayland, libqt6svg6,
+ qml6-module-qtcore, qml6-module-qtmultimedia, qml6-module-qtqml,
+ qml6-module-qtquick, qml6-module-qtquick-controls,
+ qml6-module-qtquick-dialogs, qml6-module-qtquick-effects,
+ qml6-module-qtquick-layouts, qml6-module-qtquick-templates,
+ qml6-module-qtquick-window,
+ libpipewire-0.3-0t64, libpangocairo-1.0-0, libpango-1.0-0, libcairo2,
+ libdisplay-info2, libgbm1, libseat1, libudev1, libinput10,
+ libpixman-1-0, libxkbcommon0, libglib2.0-0t64, libdrm2, libsystemd0
+Recommends:
+ alacritty,
+ fonts-noto-mono,
+ fuzzel,
+ swaylock,
+ firefox-esr
+Description: Dank Material Shell runtime for Anland Hyprland
+ This package contains the tested ARM64 Dank Material Shell and Quickshell
+ runtime plus its QML assets.  It is intended for the Debian-patched Anland
+ Hyprland session and is started automatically by start-hyprland-anland.
+ .
+ The shell is intentionally split from the compositor so ordinary Hyprland
+ installations do not receive vendor binaries or the full desktop stack.
+
+Package: hyprland-anland-desktop
+Architecture: arm64
+Multi-Arch: foreign
+Depends: ${misc:Depends},
+ hyprland (= ${binary:Version}),
+ hyprland-anland-dms (= ${binary:Version}),
+ xwayland,
+ xdg-desktop-portal,
+ xdg-desktop-portal-hyprland
+Description: Complete Anland Hyprland touch desktop
+ This metapackage installs the complete ARM64 Anland desktop session: the
+ Debian-patched Hyprland compositor, Dank Material Shell, Xwayland, desktop
+ portals, and their runtime dependencies.
+ .
+ Install it together with the patched xwayland .deb produced by this source
+ tree, then start the session with start-hyprland-anland.
 
 Package: hyprland-backgrounds
 Architecture: all

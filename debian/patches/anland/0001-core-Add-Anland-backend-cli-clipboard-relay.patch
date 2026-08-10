@@ -125,7 +125,7 @@ Index: anland-quilt4/src/Compositor.cpp
      initManagers(STAGE_LATE);
  
      m_listeners.lock = g_pSessionLockManager->m_events.lock.listen([this] {
-@@ -471,6 +541,186 @@ void CCompositor::initAllSignals() {
+@@ -471,6 +541,191 @@ void CCompositor::initAllSignals() {
          g_pInputManager->newMouse(dev);
          g_pInputManager->updateCapabilities();
      });
@@ -177,9 +177,26 @@ Index: anland-quilt4/src/Compositor.cpp
 +                Log::logger->log(Log::ERR, "anland: no InputManager, dropping text");
 +                return;
 +            }
-+            // ── Path 2 (PRIMARY): XKB keysym → keyboard event injection ──
-+            // This is the proven path — uses the same onKeyboardKey mechanism as
-+            // the consumer's extra keyboard bar, which the user confirmed works.
++            // ── Path 1 (PRIMARY): text-input protocol ─────────────────────
++            // Android supplies committed UTF-8, not an XKB key sequence.  Send it
++            // to a focused text-input client first: this preserves non-ASCII text
++            // (notably Chinese) and lets the client own its IME commit semantics.
++            // The XKB route below can only represent the explicit ASCII map.
++            CTextInput* ti = g_pInputManager->m_relay.getFocusedTextInput();
++            if (ti && ti->isEnabled()) {
++                Log::logger->log(Log::INFO, "anland: using Path 1 (text-input protocol)");
++                ti->commitStringFromConsumer(str);
++                return;
++            }
++            if (ti)
++                Log::logger->log(Log::INFO, "anland: Path 1 skipped (text-input found but not enabled)");
++            else
++                Log::logger->log(Log::INFO, "anland: Path 1 skipped (no focused text-input)");
++
++            // ── Path 2 (FALLBACK): XKB keyboard event injection ────────────
++            // This keeps ASCII input working for clients that do not implement
++            // text-input (including simple/XWayland clients), but cannot encode
++            // Chinese or other characters absent from its explicit key map.
 +            Log::logger->log(Log::INFO, std::format("anland: Path 2 — keyboard count={}", g_pInputManager->m_keyboards.size()));
 +            SP<::IKeyboard> kb;
 +            for (auto const& k : g_pInputManager->m_keyboards) {
@@ -293,19 +310,7 @@ Index: anland-quilt4/src/Compositor.cpp
 +                Log::logger->log(Log::INFO, std::format("anland: Path 2 — injected {} keystrokes", injected));
 +                return;
 +            }
-+            Log::logger->log(Log::INFO, "anland: Path 2 failed — no XKB keyboard, falling back to Path 1");
-+            // ── Path 1 (FALLBACK): text-input protocol ──
-+            CTextInput* ti = g_pInputManager->m_relay.getFocusedTextInput();
-+            if (ti && ti->isEnabled()) {
-+                Log::logger->log(Log::INFO, "anland: using Path 1 (text-input protocol)");
-+                ti->commitStringFromConsumer(str);
-+                return;
-+            }
-+            if (ti)
-+                Log::logger->log(Log::INFO, "anland: Path 1 skipped (text-input found but not enabled)");
-+            else
-+                Log::logger->log(Log::INFO, "anland: Path 1 skipped (no focused text-input)");
-+            Log::logger->log(Log::ERR, "anland: both paths failed — text dropped");
++            Log::logger->log(Log::ERR, "anland: no text-input client and no XKB keyboard — text dropped");
 +        };
 +    }
 +

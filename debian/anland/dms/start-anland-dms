@@ -1,0 +1,75 @@
+#!/bin/sh
+# Launch Dank Material Shell against an already-running Anland Hyprland session.
+# The shell deliberately runs as the compositor user: this preserves Wayland,
+# Hyprland IPC and PipeWire socket permissions without opening them to another
+# account.
+set -eu
+
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR="$runtime"
+
+find_instance() {
+    newest=""
+    for candidate in "$runtime"/hypr/*; do
+        [ -S "$candidate/.socket.sock" ] || continue
+        if [ -z "$newest" ] || [ "$candidate/.socket.sock" -nt "$newest/.socket.sock" ]; then
+            newest="$candidate"
+        fi
+    done
+    printf '%s\n' "$newest"
+}
+
+instance=""
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && \
+   [ -S "$runtime/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock" ]; then
+    instance="$runtime/hypr/$HYPRLAND_INSTANCE_SIGNATURE"
+fi
+
+# Hyprland exports its instance signature to clients, not to its launching
+# parent shell.  Wait for and discover the instance created by the launcher.
+i=0
+while [ -z "$instance" ] && [ "$i" -lt 100 ]; do
+    instance="$(find_instance)"
+    [ -n "$instance" ] || { i=$((i + 1)); sleep 0.05; }
+done
+
+if [ -z "$instance" ]; then
+    echo "start-anland-dms: Hyprland IPC socket is not ready" >&2
+    exit 1
+fi
+
+signature="${instance##*/}"
+wayland_name="${WAYLAND_DISPLAY:-}"
+if [ -z "$wayland_name" ] || [ ! -S "$runtime/$wayland_name" ]; then
+    wayland_name=""
+    for candidate in "$runtime"/wayland-*; do
+        [ -S "$candidate" ] || continue
+        wayland_name="${candidate##*/}"
+        break
+    done
+fi
+
+if [ -z "$wayland_name" ] || [ ! -S "$runtime/$wayland_name" ]; then
+    echo "start-anland-dms: Wayland socket is not ready" >&2
+    exit 1
+fi
+
+# Do not create duplicate layer-shell surfaces when the session launcher is
+# invoked a second time.
+if pgrep -u "$(id -u)" -f '/hyprland-anland/dms/bin/dms run' >/dev/null 2>&1; then
+    exit 0
+fi
+
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+settings="$config_home/DankMaterialShell/settings.json"
+if [ ! -e "$settings" ]; then
+    mkdir -p "${settings%/*}"
+    cp /usr/share/hyprland-anland/dms/settings.json "$settings"
+fi
+
+export HYPRLAND_INSTANCE_SIGNATURE="$signature"
+export WAYLAND_DISPLAY="$wayland_name"
+export QT_QPA_PLATFORM=wayland
+export DMS_DISABLE_MATUGEN="${DMS_DISABLE_MATUGEN:-1}"
+export PATH="/usr/lib/hyprland-anland/dms/bin:$PATH"
+exec /usr/lib/hyprland-anland/dms/bin/dms run
