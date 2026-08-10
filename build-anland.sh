@@ -121,20 +121,33 @@ build_anland_xwayland() {
         return 2
     fi
 
-    # Same source-repository activation logic as
-    # anland-main/producers/kde/Debian13_v5/build.sh.  Do not add or pin a
-    # forky source here: use the distribution source configured by the host.
-    if ! sudo grep -rqsE '^Types:.*deb-src|^deb-src ' \
+    # APT source definitions vary across Debian and Ubuntu. Enable deb-src in
+    # deb822 files first (notably Debian's minimal-container debian.sources),
+    # then derive source entries from any traditional deb lines.
+    if ! sudo grep -rqsE '^[[:space:]]*Types:[[:space:]].*deb-src|^[[:space:]]*deb-src[[:space:]]+' \
             /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
         echo "build-anland: enabling deb-src repositories for Xwayland" >&2
-        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i 's/^Types: deb$/Types: deb deb-src/' \
-                /etc/apt/sources.list.d/ubuntu.sources
-        elif [ -f /etc/apt/sources.list ]; then
-            sudo sed -i 's/^deb \(.*\)$/deb \1\ndeb-src \1/' /etc/apt/sources.list
+        sudo find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.sources' \
+            -exec sed -i 's/^[[:space:]]*Types:[[:space:]]*deb$/Types: deb deb-src/' {} +
+
+        xwayland_sources=$(mktemp)
+        sudo sh -c '
+            grep -rhsE "^[[:space:]]*deb[[:space:]]+" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+                | sed "s/^[[:space:]]*deb[[:space:]]\\+/deb-src /" \
+                > "$1"
+        ' sh "$xwayland_sources"
+        if [ -s "$xwayland_sources" ]; then
+            sudo install -m 0644 "$xwayland_sources" /etc/apt/sources.list.d/anland-xwayland-deb-src.list
+        fi
+        rm -f "$xwayland_sources"
+
+        if ! sudo grep -rqsE '^[[:space:]]*Types:[[:space:]].*deb-src|^[[:space:]]*deb-src[[:space:]]+' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+            echo "build-anland: cannot derive deb-src repositories from the host APT configuration" >&2
+            return 2
         fi
     fi
-    sudo apt-get update -qq || echo "build-anland: apt-get update reported issues" >&2
+    sudo apt-get update -qq
     sudo env DEBIAN_FRONTEND=noninteractive apt-get build-dep -y xwayland
 
     rm -rf "$xwayland_workdir"
