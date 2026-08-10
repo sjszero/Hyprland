@@ -9,4 +9,4 @@ anland/0002-input-Bridge-Anland-consumer-IME-text.patch
 anland/0003-start-Provide-Anland-audio-session-launcher.patch
 anland/0004-config-Use-normal-Hyprland-config-and-log-paths.patch
 anland/0005-render-Drop-hot-path-swapchain-debug-log.patch
-anland/0006-start-Launch-bundled-DMS-automatically.patch
+anland/0006-start-Launch-official-DMS-automatically.patch

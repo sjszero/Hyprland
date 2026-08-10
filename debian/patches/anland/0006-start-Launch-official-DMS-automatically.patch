@@ -1,0 +1,51 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Sun, 10 Aug 2026 07:00:00 +0800
+Subject: start: launch official DMS automatically
+
+Use the official AvengeMedia DMS package when it is installed. The launcher
+waits for Hyprland's Wayland socket before starting DMS, so the shell receives
+the correct Wayland session environment without carrying a local DMS bundle.
+
+---
+--- anland-quilt4.orig/scripts/start-hyprland-anland
++++ anland-quilt4/scripts/start-hyprland-anland
+@@ -51,11 +51,27 @@
+-# DMS is opt-in.  The dedicated launcher is responsible for its user/runtime
+-# isolation and waits for the Wayland socket after Hyprland creates it.
+-if [ "${ANLAND_DMS:-0}" = 1 ]; then
+-    if command -v start-anland-dms >/dev/null 2>&1; then
+-        start-anland-dms >/dev/null 2>&1 &
+-        children="$children $!"
+-    else
+-        echo "start-hyprland-anland: ANLAND_DMS=1 but start-anland-dms is unavailable" >&2
+-    fi
+-fi
+-
++# DMS is supplied by the official AvengeMedia package. Start it after
++# Hyprland has created its Wayland and IPC sockets; --session preserves the
++# official package's session semantics.
++start_dms() {
++    if pgrep -u "$(id -u)" -x dms >/dev/null 2>&1; then
++        return 0
++    fi
++    i=0
++    while [ "$i" -lt 100 ]; do
++        for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
++            [ -S "$socket" ] || continue
++            WAYLAND_DISPLAY="${socket##*/}" QT_QPA_PLATFORM=wayland exec dms run --session
++            return 0
++        done
++        i=$((i + 1))
++        sleep 0.05
++    done
++    echo "start-hyprland-anland: DMS was not started because the Wayland socket was not ready" >&2
++}
++
++if command -v dms >/dev/null 2>&1; then
++    start_dms &
++    children="$children $!"
++else
++    echo "start-hyprland-anland: official dms package is unavailable; starting compositor only" >&2
++fi
++
+ /usr/bin/start-hyprland --anland "$@" &

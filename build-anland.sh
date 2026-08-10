@@ -92,7 +92,26 @@ fi
 # Xwayland is mandatory for the Anland desktop because its kgsl/turnip patch
 # enables accelerated X11 clients.  Keep the patch upstream rather than
 # vendoring it: this mirrors anland-main's producer approach.
+download_official_dms() {
+    dms_workdir="$stage/dms-download"
+    rm -rf "$dms_workdir"
+    mkdir -p "$dms_workdir"
+    (
+        cd "$dms_workdir"
+        # Download only: the official package and its dependency metadata remain
+        # owned by AvengeMedia's APT repository, not this source package.
+        apt-get download dms
+    )
+    dms_deb=$(find "$dms_workdir" -maxdepth 1 -type f -name "dms_*_${deb_arch}.deb" -print | head -n 1)
+    if [ -z "$dms_deb" ]; then
+        echo "build-anland: official dms ARM64 package was not downloaded; configure the AvengeMedia DMS APT source" >&2
+        return 2
+    fi
+    cp -f "$dms_deb" "$root/artifacts/"
+}
+
 build_anland_xwayland() {
+
     xwayland_workdir="${XWAYLAND_WORKDIR:-$root/.cache/xwayland-anland-build}"
     xwayland_patch="$xwayland_workdir/xwayland.patch"
     xwayland_url="${XWAYLAND_PATCH_URL:-https://raw.githubusercontent.com/superturtlee/anland/main/producers/kde/Debian13_v5/xwayland.patch}"
@@ -165,9 +184,8 @@ cp -a "$root/." "$stage/"
 # control files as shell scripts.
 find "$stage/debian" "$stage/aquamarine-0.12.1/debian" -type f -exec chmod -x {} + 2>/dev/null || true
 chmod +x "$stage/debian/rules" "$stage/aquamarine-0.12.1/debian/rules" \
-    "$stage/debian/anland/dms/start-anland-dms" \
-    "$stage/aquamarine-0.12.1/data/hwdata.sh" \
-    "$stage/scripts/generateShaderIncludes.sh"
+     "$stage/aquamarine-0.12.1/data/hwdata.sh" \
+     "$stage/scripts/generateShaderIncludes.sh"
 
 # The embedded source tree already contains the Anland implementation files,
 # while this compatibility change is intentionally delivered only as a quilt
@@ -215,17 +233,19 @@ mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
 for package in \
     "$(dirname "$stage")"/hyprland_0.55.4+ds-2_"$deb_arch".deb \
-    "$(dirname "$stage")"/hyprland-anland-dms_0.55.4+ds-2_"$deb_arch".deb \
-    "$(dirname "$stage")"/hyprland-anland-desktop_0.55.4+ds-2_"$deb_arch".deb \
-    "$stage"/libaquamarine11_0.12.1-1_"$deb_arch".deb; do
+     "$(dirname "$stage")"/hyprland-anland-desktop_0.55.4+ds-2_"$deb_arch".deb \
+     "$stage"/libaquamarine11_0.12.1-1_"$deb_arch".deb; do
     if [ ! -f "$package" ]; then
         echo "build-anland: expected package was not produced: $package" >&2
         exit 2
     fi
     cp -f "$package" "$root/artifacts/"
 done
+# Download the official DMS package from the AvengeMedia source configured by
+# the host or CI. Do not install, unpack, or repackage it here.
+download_official_dms
 # Xwayland needs the matching kgsl/turnip patch for X11 clients to use the
-# Android GPU path.  It is a separate Debian source package, built by the same
+# Android GPU path. It is a separate Debian source package, built by the same
 # apt-source/build-dep/patch/dpkg-buildpackage flow as anland-main's producer.
 build_anland_xwayland
 sha256sum "$root/artifacts"/*.deb > "$root/artifacts/SHA256SUMS"

@@ -24,6 +24,18 @@ jobs:
           # full history on the ARM runner.
           fetch-depth: 1
 
+      - name: Configure official DMS repository
+        run: |
+          install -d -m 0755 /etc/apt/keyrings
+          curl --fail --location --retry 3 --output /etc/apt/keyrings/avengemedia-dms.asc \
+            https://download.opensuse.org/repositories/home:/AvengeMedia:/dms/Debian_Unstable/Release.key
+          cat > /etc/apt/sources.list.d/avengemedia-dms.sources <<'EOF'
+          Types: deb
+          URIs: https://download.opensuse.org/repositories/home:/AvengeMedia:/dms/Debian_Unstable/
+          Suites: /
+          Signed-By: /etc/apt/keyrings/avengemedia-dms.asc
+          EOF
+
       - name: Install build dependencies
         run: |
           export DEBIAN_FRONTEND=noninteractive
@@ -69,7 +81,7 @@ jobs:
           host_arch=$(dpkg --print-architecture)
           test "$host_arch" = arm64
           test -f "artifacts/hyprland_0.55.4+ds-2_${host_arch}.deb"
-          test -f "artifacts/hyprland-anland-dms_0.55.4+ds-2_${host_arch}.deb"
+          test "$(find artifacts -maxdepth 1 -type f -name "dms_*_${host_arch}.deb" | wc -l)" -eq 1
           test -f "artifacts/hyprland-anland-desktop_0.55.4+ds-2_${host_arch}.deb"
           test -f "artifacts/libaquamarine11_0.12.1-1_${host_arch}.deb"
           test "$(find artifacts -maxdepth 1 -type f -name "xwayland_*_${host_arch}.deb" | wc -l)" -ge 1
@@ -86,7 +98,7 @@ jobs:
           compression-level: 0
           path: |
             artifacts/hyprland_0.55.4+ds-2_arm64.deb
-            artifacts/hyprland-anland-dms_0.55.4+ds-2_arm64.deb
+            artifacts/dms_*_arm64.deb
             artifacts/hyprland-anland-desktop_0.55.4+ds-2_arm64.deb
             artifacts/libaquamarine11_0.12.1-1_arm64.deb
             artifacts/xwayland_*_arm64.deb
