@@ -24,8 +24,13 @@ jobs:
           # full history on the ARM runner.
           fetch-depth: 1
 
-      - name: Configure official DMS repository
+      - name: Configure official DMS repository and build dependencies
         run: |
+          export DEBIAN_FRONTEND=noninteractive
+          # debian:forky is intentionally minimal; curl is needed before the
+          # AvengeMedia key can be downloaded.
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl
           install -d -m 0755 /etc/apt/keyrings
           curl --fail --location --retry 3 --output /etc/apt/keyrings/avengemedia-dms.asc \
             https://download.opensuse.org/repositories/home:/AvengeMedia:/dms/Debian_Unstable/Release.key
@@ -35,13 +40,9 @@ jobs:
           Suites: /
           Signed-By: /etc/apt/keyrings/avengemedia-dms.asc
           EOF
-
-      - name: Install build dependencies
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates ccache cmake cpio curl debhelper-compat \
+            build-essential ccache cmake cpio debhelper-compat \
             devscripts dpkg-dev fakeroot g++-16 git pkg-config pkgconf sudo hwdata \
             hyprland-protocols hyprwayland-scanner hyprwire-scanner \
             libcairo-dev libdisplay-info-dev libdrm-dev libegl-dev \
