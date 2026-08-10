@@ -70,7 +70,7 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get update
 # Hyprland session components used by a normal DMS/Hyprland desktop. DMS is not
 # carried in the artifact: the metapackage dependency resolves dms itself, and
 # its complete runtime closure, from the AvengeMedia repositories above.
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
     "$aquamarine_deb" \
     "$hyprland_deb" \
     "$xwayland_deb" \
@@ -82,6 +82,7 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     hyprpolkitagent \
     hyprsunset \
     xdg-desktop-portal-hyprland \
-    xdg-desktop-portal-gtk
+    xdg-desktop-portal-gtk \
+    hyprland-guiutils
 
 echo "Anland Hyprland desktop installed. Start it with: start-hyprland-anland"

@@ -85,6 +85,10 @@ if [ "${ANLAND_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
     export CCACHE_NOHASHDIR=true
     export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}"
     mkdir -p "$CCACHE_DIR"
+    # When CI installs its verification wrapper at /usr/local/bin/ccache, keep
+    # the compiler commands as `ccache <compiler>` so the wrapper can prove
+    # that dpkg-buildpackage actually routed compilation through ccache.
+    export PATH="/usr/local/bin:$PATH"
     export CC="ccache ${CC}"
     export CXX="ccache ${CXX}"
     ccache --set-config=max_size="$CCACHE_MAXSIZE"

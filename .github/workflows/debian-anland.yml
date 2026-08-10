@@ -14,6 +14,14 @@ jobs:
     # Native GitHub-hosted ARM64 runner.  debian:forky is multi-architecture,
     # so Docker pulls its arm64 image and dpkg-buildpackage produces arm64 .deb files.
     runs-on: ubuntu-24.04-arm
+    env:
+      # Keep the cache outside the disposable native build staging directory.
+      # build-anland.sh supplies its stable staging directory as CCACHE_BASEDIR.
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_STATSLOG: ${{ github.workspace }}/ccache.stats
+      CCACHE_WRAPPER_LOG: ${{ github.workspace }}/ccache-wrapper.log
+      CCACHE_MAXSIZE: 2G
     container:
       image: debian:forky
     steps:
@@ -45,16 +53,39 @@ jobs:
             glslang-tools wayland-protocols xwayland xxd
 
       - name: Restore compiler cache
-        uses: actions/cache@v4
+        id: ccache-restore
+        uses: actions/cache/restore@v5
         with:
-          path: .cache/ccache
-          # Key compiler-input changes only.  Hashing all debian/** and the full
-          # Aquamarine tree created a new cache namespace for changelogs,
-          # control metadata, and other packaging-only edits.
-          key: ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v3-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'protocols/**', 'scripts/**', 'debian/patches/**', 'aquamarine-0.12.1/CMakeLists.txt', 'aquamarine-0.12.1/src/**', 'aquamarine-0.12.1/include/**', 'aquamarine-0.12.1/protocols/**', 'aquamarine-0.12.1/debian/patches/**') }}
+          path: ${{ env.CCACHE_DIR }}
+          # Use an immutable save key, then restore the latest cache for this
+          # compiler/architecture prefix. This avoids replacing a warm cache
+          # with a cache from an unrelated source-hash namespace.
+          key: ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-forky-ccache-v3-
-            ${{ runner.os }}-${{ runner.arch }}-forky-ccache-
+            ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-
+
+      - name: Configure and verify ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          cat > /usr/local/bin/ccache <<'EOF'
+          #!/bin/sh
+          unset CCACHE_DISABLE CCACHE_NOSTATS
+          printf '.\n' >> "$CCACHE_WRAPPER_LOG"
+          exec /usr/bin/ccache "$@"
+          EOF
+          chmod 0755 /usr/local/bin/ccache
+          test "$(command -v ccache)" = /usr/local/bin/ccache
+          ccache --set-config=max_size="$CCACHE_MAXSIZE"
+          ccache --show-config
+          ccache --zero-stats
+          : > "$CCACHE_STATSLOG"
+          : > "$CCACHE_WRAPPER_LOG"
+          printf 'int main(void) { return 0; }\n' > /tmp/ccache-smoke.c
+          ccache cc -c /tmp/ccache-smoke.c -o /tmp/ccache-smoke.o
+          smoke_calls=$(ccache --print-stats | awk \
+            '$1 == "cache_miss" || $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { total += $2 } END { print total + 0 }')
+          test "$smoke_calls" -gt 0
+          ccache --zero-stats
 
       - name: Prepare unprivileged builder
         run: |
@@ -65,7 +96,24 @@ jobs:
 
       - name: Build Aquamarine and Hyprland
         run: |
-          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && DEB_BUILD_OPTIONS=parallel=$(nproc) ./build-anland.sh"
+          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && CCACHE_DIR='$CCACHE_DIR' CCACHE_COMPILERCHECK='$CCACHE_COMPILERCHECK' CCACHE_STATSLOG='$CCACHE_STATSLOG' CCACHE_WRAPPER_LOG='$CCACHE_WRAPPER_LOG' CCACHE_MAXSIZE='$CCACHE_MAXSIZE' DEB_BUILD_OPTIONS=parallel=$(nproc) ./build-anland.sh"
+          wrapper_calls=$(wc -l < "$CCACHE_WRAPPER_LOG")
+          ccache --show-stats --verbose
+          ccache --show-log-stats
+          cacheable_calls=$(ccache --print-log-stats | awk \
+            '$1 == "cache_miss" || $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { total += $2 } END { print total + 0 }')
+          echo "ccache wrapper calls recorded: $wrapper_calls"
+          echo "Cacheable calls recorded: $cacheable_calls"
+          test "$wrapper_calls" -gt 0
+          test "$cacheable_calls" -gt 0
+          du -sh "$CCACHE_DIR"
+
+      - name: Save compiler cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Verify selected packages
         run: |
