@@ -1,0 +1,33 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Tue, 12 Aug 2026 00:00:00 +0000
+Subject: [PATCH] compat: replace ranges::starts_with for GCC 15
+
+GCC 15 in the current Debian arm64 build environment does not provide
+std::ranges::starts_with. Implement the equivalent prefix check using
+facilities available in that toolchain. This is kept as a Debian quilt
+patch and does not modify the upstream source tree in Git.
+
+Forwarded: not-needed
+---
+ src/helpers/MiscFunctions.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+--- a/src/helpers/MiscFunctions.cpp
++++ b/src/helpers/MiscFunctions.cpp
+@@ -835,10 +835,15 @@ bool truthy(const std::string& str) {
+     // clang-format off
+     auto str_view = str | std::views::transform([](unsigned char ch) -> char {
+         return sc<char>(std::tolower(ch));
+     });
+ 
++    const auto starts_with = [&](const std::string_view prefix) {
++        const auto begin = std::ranges::begin(str_view);
++        return std::ranges::distance(str_view) >= static_cast<ptrdiff_t>(prefix.size()) &&
++               std::ranges::equal(prefix, std::ranges::subrange(begin, begin + prefix.size()));
++    };
+     return [&](auto&&... prefixes) -> bool {
+-        return (... || std::ranges::starts_with(str_view, prefixes));
++        return (... || starts_with(prefixes));
+     }("true"sv, "yes"sv, "on"sv);
+     // clang-format on
+ }

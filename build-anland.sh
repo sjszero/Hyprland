@@ -10,7 +10,7 @@ if [ "$(id -u)" -eq 0 ]; then
     echo "build-anland: do not run dpkg-buildpackage as root" >&2
     exit 2
 fi
-if [ ! -f "$root/debian/control" ] || [ ! -f "$root/aquamarine-0.12.1/debian/control" ]; then
+if [ ! -f "$root/debian/control" ] || [ ! -f "$root/aquamarine-0.14.0/debian/control" ]; then
     echo "build-anland: incomplete checkout" >&2
     exit 2
 fi
@@ -37,12 +37,12 @@ EOF
     export DEBIAN_FRONTEND=noninteractive
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends \
-        build-essential ca-certificates ccache cmake cpio debhelper-compat devscripts \
+        build-essential ca-certificates ccache cmake cpio curl debhelper-compat devscripts meson ninja-build quilt \
         dpkg-dev fakeroot g++-16 git pkg-config pkgconf hwdata \
         hyprland-protocols hyprwayland-scanner hyprwire-scanner \
         libcairo-dev libdisplay-info-dev libdrm-dev libegl-dev libegl1-mesa-dev \
         libgbm-dev libgles-dev libglaze-dev libhyprcursor-dev libhyprgraphics-dev \
-        libhyprlang-dev libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev \
+        libhyprlang-dev libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev libglm-dev \
         liblua5.5-dev libmuparser-dev libpango1.0-dev libpixman-1-dev \
         libpipewire-0.3-dev libspa-0.2-dev libseat-dev libeis-dev libre2-dev libssl-dev \
         libsdbus-c++-dev libtomlplusplus-dev libudev-dev libudis86-dev libwayland-dev libxkbcommon-dev \
@@ -53,7 +53,7 @@ fi
 # Ignore any locally installed *-uninstalled.pc files.  In particular, a
 # /usr/local aquamarine-uninstalled.pc can add /usr/lib to Hyprland's linker
 # search path, causing it to link an unpackaged library copy instead of the
-# multiarch library in libaquamarine11.
+# multiarch library in libaquamarine13.
 multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
 deb_arch=$(dpkg-architecture -qDEB_HOST_ARCH)
 export PKG_CONFIG_LIBDIR="/usr/lib/$multiarch/pkgconfig:/usr/share/pkgconfig"
@@ -119,7 +119,7 @@ build_anland_xwayland() {
     # APT source definitions vary across Debian and Ubuntu. Enable deb-src in
     # deb822 files first (notably Debian's minimal-container debian.sources),
     # then derive source entries from any traditional deb lines.
-    if ! sudo grep -rqsE '^[[:space:]]*Types:[[:space:]].*deb-src|^[[:space:]]*deb-src[[:space:]]+' \
+    if ! grep -rqsE '^[[:space:]]*Types:[[:space:]].*deb-src|^[[:space:]]*deb-src[[:space:]]+' \
             /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
         echo "build-anland: enabling deb-src repositories for Xwayland" >&2
         sudo find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.sources' \
@@ -197,37 +197,25 @@ cp -a "$root/." "$stage/"
 # All debian/* files except rules are declarative configuration files.
 # The mounted workspace can mark them executable, causing debhelper to run
 # control files as shell scripts.
-find "$stage/debian" "$stage/aquamarine-0.12.1/debian" -type f -exec chmod -x {} + 2>/dev/null || true
-chmod +x "$stage/debian/rules" "$stage/aquamarine-0.12.1/debian/rules" \
-     "$stage/aquamarine-0.12.1/data/hwdata.sh" \
+find "$stage/debian" "$stage/aquamarine-0.14.0/debian" -type f -exec chmod -x {} + 2>/dev/null || true
+chmod +x "$stage/debian/rules" "$stage/aquamarine-0.14.0/debian/rules" \
+     "$stage/aquamarine-0.14.0/data/hwdata.sh" \
      "$stage/scripts/generateShaderIncludes.sh"
 
-# The embedded source tree already contains the Anland implementation files,
-# while this compatibility change is intentionally delivered only as a quilt
-# patch.  Apply it explicitly in the native staging tree before compiling.
-# (The workspace mount cannot reliably preserve executable bits or quilt state.)
+# Keep the Aquamarine upstream source clean. Anland functionality is carried
+# exclusively by the Debian quilt series and is applied only in native staging.
 (
-    cd "$stage/aquamarine-0.12.1"
-    if grep -q '    return session;' src/backend/Backend.cpp; then
-        patch --batch -p1 < debian/patches/anland/0007-compat-Use-explicit-session-pointer-conversion.patch
-    fi
-    if grep -q '    return primary;' src/backend/drm/DRM.cpp; then
-        patch --batch -p1 < debian/patches/anland/0008-compat-Use-explicit-weak-pointer-conversion.patch
-    fi
-    if grep -q '^[[:space:]]*close(fds\[i\]);' src/backend/anland/AnlandInput.cpp && ! grep -q '^#include <unistd.h>' src/backend/anland/AnlandInput.cpp; then
-        patch --batch -p1 < debian/patches/anland/0009-compat-Include-unistd-for-close.patch
-    fi
-    grep -q 'return static_cast<bool>(session);' src/backend/Backend.cpp
-    grep -q '^#include <unistd.h>' src/backend/anland/AnlandInput.cpp
-    grep -q 'return static_cast<bool>(primary);' src/backend/drm/DRM.cpp
-    if grep -q 'add_executable(attachments' CMakeLists.txt; then
-        patch --batch -p1 < debian/patches/anland/0010-compat-Disable-failing-optional-tests.patch
-    fi
-    ! grep -q 'add_executable(attachments' CMakeLists.txt
+    cd "$stage/aquamarine-0.14.0"
+    QUILT_PATCHES=debian/patches quilt push -a
+    grep -q "return static_cast<bool>(session);" src/backend/Backend.cpp
+    grep -q "^#include <unistd.h>" src/backend/anland/AnlandInput.cpp
+    grep -q "return static_cast<bool>(primary);" src/backend/drm/DRM.cpp
+    ! grep -q "add_executable(attachments" CMakeLists.txt
     dpkg-buildpackage -us -uc -b
 )
 
-sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stage"/libaquamarine-dev_*.deb
+
+sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine13_*.deb "$stage"/libaquamarine-dev_*.deb
 
 (
     cd "$stage"
@@ -244,8 +232,11 @@ sudo apt-get install -y --allow-downgrades "$stage"/libaquamarine11_*.deb "$stag
 
 # Retain only the required runtime packages.  Background, debug and development
 # packages are deliberately left in the temporary build directory and removed on exit.
+# Hyprgrass is compiled during the Hyprland Debian install phase and is therefore
+# embedded in hyprland_<version>_<arch>.deb, never delivered as a loose plugin.
 mkdir -p "$root/artifacts"
 rm -f "$root/artifacts"/*.deb "$root/artifacts/SHA256SUMS"
+rm -rf "$root/artifacts/hyprgrass"
 copy_one_deb() {
     pattern=$1
     package=$(find "$(dirname "$stage")" "$stage" -maxdepth 1 -type f \
@@ -261,7 +252,7 @@ copy_one_deb() {
 # determines the package version, so a future source refresh remains coherent.
 copy_one_deb "hyprland_*_${deb_arch}.deb"
 copy_one_deb "hyprland-anland-desktop_*_${deb_arch}.deb"
-copy_one_deb "libaquamarine11_*_${deb_arch}.deb"
+copy_one_deb "libaquamarine13_*_${deb_arch}.deb"
 # DMS is installed by install-anland-desktop.sh from its official APT source.
 # Keep the build artifact focused on the locally built Debian packages.
 # Xwayland needs the matching kgsl/turnip patch for X11 clients to use the

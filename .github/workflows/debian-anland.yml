@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Aquamarine and Hyprland arm64 Debian packages
+    name: Build Aquamarine 0.14 and Hyprland arm64 Debian packages
     # Native GitHub-hosted ARM64 runner.  debian:forky is multi-architecture,
     # so Docker pulls its arm64 image and dpkg-buildpackage produces arm64 .deb files.
     runs-on: ubuntu-24.04-arm
@@ -37,13 +37,13 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates ccache cmake cpio curl debhelper-compat \
-            devscripts dpkg-dev fakeroot g++-16 git pkg-config pkgconf sudo hwdata \
+            build-essential ca-certificates ccache cmake cpio curl debhelper-compat meson ninja-build \
+            devscripts dpkg-dev fakeroot g++-16 git pkg-config pkgconf quilt sudo hwdata \
             hyprland-protocols hyprwayland-scanner hyprwire-scanner \
             libcairo-dev libdisplay-info-dev libdrm-dev libegl-dev \
             libegl1-mesa-dev libgbm-dev libgles-dev libglaze-dev \
             libhyprcursor-dev libhyprgraphics-dev libhyprlang-dev \
-            libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev \
+            libhyprutils-dev libhyprwire-dev libinput-dev liblcms2-dev libglm-dev \
             liblua5.5-dev libmuparser-dev libpango1.0-dev libpixman-1-dev \
             libpipewire-0.3-dev libspa-0.2-dev libseat-dev libeis-dev libre2-dev \
             libsdbus-c++-dev libssl-dev libtomlplusplus-dev libudev-dev libudis86-dev \
@@ -121,9 +121,12 @@ jobs:
           test "$host_arch" = arm64
           test "$(find artifacts -maxdepth 1 -type f -name "hyprland_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "hyprland-anland-desktop_*_${host_arch}.deb" | wc -l)" -eq 1
-          test "$(find artifacts -maxdepth 1 -type f -name "libaquamarine11_*_${host_arch}.deb" | wc -l)" -eq 1
+          test "$(find artifacts -maxdepth 1 -type f -name "libaquamarine13_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "xwayland_*_${host_arch}.deb" | wc -l)" -ge 1
           test "$(find artifacts -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 4
+          hyprland_deb=$(find artifacts -maxdepth 1 -type f -name "hyprland_*_${host_arch}.deb" ! -name '*anland*')
+          dpkg-deb -c "$hyprland_deb" | grep -F "/usr/lib/aarch64-linux-gnu/hyprland/plugins/libhyprgrass.so"
+          test ! -e artifacts/hyprgrass/libhyprgrass.so
           test -x artifacts/install-anland-desktop.sh
           (cd artifacts && sha256sum -c SHA256SUMS)
 
@@ -139,7 +142,7 @@ jobs:
           path: |
             artifacts/hyprland_*_arm64.deb
             artifacts/hyprland-anland-desktop_*_arm64.deb
-            artifacts/libaquamarine11_*_arm64.deb
+            artifacts/libaquamarine13_*_arm64.deb
             artifacts/xwayland_*_arm64.deb
             artifacts/install-anland-desktop.sh
             artifacts/SHA256SUMS

@@ -1,4 +1,7 @@
 add-fortify-flags-for-subprojects.patch
+gcc15-ranges-starts-with.patch
+hyprgrass-lua-only-hyprland-0.56.patch
+
 embed.patch
 gcc-port.patch
 Move-hyprland.pc-into-libdir.patch
