@@ -23,7 +23,6 @@ class CBackgroundEffect {
     CRegion                           m_blurRegion;
 
     void                              destroy();
-    void                              markPending();
 
     struct {
         CHyprSignalListener surfaceCommitted;

@@ -1,5 +1,5 @@
-#include <vector>
 #include <hyprland/src/protocols/core/Seat.hpp>
+#include <vector>
 
 // Probably not compatible with move semantics, I really don't know
 template <class T> class VecSet {
@@ -20,6 +20,4 @@ template <class T> class VecSet {
     std::vector<T> set;
 };
 
-// For some reason if I put this anywhere else the symbols don't get compiled in.
-// C++ is a beauty
 template class VecSet<Hyprutils::Memory::CWeakPointer<CWLTouchResource>>;

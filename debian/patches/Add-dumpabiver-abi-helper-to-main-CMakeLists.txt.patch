@@ -17,10 +17,10 @@ Forwarded: not-needed
  1 file changed, 27 insertions(+)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index d526aa6..5dd21f1 100644
+index 4fcc159..9218ed1 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -306,6 +306,33 @@
+@@ -312,6 +312,33 @@ add_library(hyprland_lib STATIC ${SRCFILES})
  add_executable(Hyprland src/main.cpp ${TRACY_CPP_FILES})
  target_link_libraries(Hyprland hyprland_lib)
  

@@ -24,14 +24,7 @@ if not hyprland_headers.found()
     error('Hyprland not found via pkg-config and environment variable HYPRLAND_HEADERS not set')
   endif
 
-  # Hyprland's private plugin headers use both <hyprland/src/...> and
-  # internal relative includes (for example "debug/..." and "wayland.hpp").
-  add_global_arguments(
-    '-I' + hyprland_src,
-    '-I' + join_paths(hyprland_src, 'src'),
-    '-I' + join_paths(hyprland_src, 'protocols'),
-    language: 'cpp'
-  )
+  add_global_arguments('-I' + hyprland_src, language: 'cpp')
 endif
 
 if get_option('hyprgrass')

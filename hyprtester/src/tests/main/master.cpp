@@ -5,7 +5,6 @@
 #include <array>
 #include <cmath>
 #include <map>
-#include <format>
 #include <string>
 #include <utility>
 #include <vector>
@@ -693,9 +692,9 @@ TEST_CASE(rollFocus) {
         // rotate the windows vector along with the actual windows
         // the rolling behavior of the window focus should follow the
         // rotating behavior of std::ranges::rotate
-        OK(getFromSocket(std::format("/dispatch hl.dsp.layout('{}')", dir)));
+        OK(getFromSocket("/dispatch hl.dsp.layout('" + dir + "')"));
         std::ranges::rotate(windows.begin(), pivot, windows.end());
-        ASSERT_CONTAINS(getFromSocket("/activewindow"), std::format("class: {}", windows.back()));
+        ASSERT_CONTAINS(getFromSocket("/activewindow"), "class: " + windows.back());
     };
 
     for (auto const& win : windows) {
@@ -783,7 +782,7 @@ TEST_CASE(centerMasterColumnResize) {
 
     // focus a window by class and read its {left edge x, height} from /activewindow
     auto geomOf = [&](const std::string& cls) -> std::pair<double, double> {
-        getFromSocket(std::format("/dispatch hl.dsp.focus({{ window = 'class:{}' }})", cls));
+        getFromSocket("/dispatch hl.dsp.focus({ window = 'class:" + cls + "' })");
         const auto STR = getFromSocket("/activewindow");
         const auto AT  = Tests::getAttribute(STR, "at");   // "x,y"
         const auto SZ  = Tests::getAttribute(STR, "size"); // "w,h"
@@ -794,7 +793,7 @@ TEST_CASE(centerMasterColumnResize) {
 
     // resizeactive-style relative resize of a specific window along y
     auto resizeY = [&](const std::string& cls, int dy) {
-        return getFromSocket(std::format("/dispatch hl.dsp.window.resize({{ x = 0, y = {}, relative = true, window = 'class:{}' }})", dy, cls));
+        return getFromSocket("/dispatch hl.dsp.window.resize({ x = 0, y = " + std::to_string(dy) + ", relative = true, window = 'class:" + cls + "' })");
     };
 
     // `top` and `bottom` share one column and must resize vertically (one grows, the other shrinks,

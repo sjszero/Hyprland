@@ -10,11 +10,10 @@
 
 namespace Config::Values {
     struct SIntValueOptions {
-        std::optional<Config::INTEGER>                                  min               = std::nullopt;
-        std::optional<Config::INTEGER>                                  max               = std::nullopt;
-        std::optional<std::unordered_map<std::string, Config::INTEGER>> map               = std::nullopt;
-        Supplementary::PropRefreshBits                                  refresh           = 0;
-        const char*                                                     deprecationNotice = nullptr;
+        std::optional<Config::INTEGER>                                  min     = std::nullopt;
+        std::optional<Config::INTEGER>                                  max     = std::nullopt;
+        std::optional<std::unordered_map<std::string, Config::INTEGER>> map     = std::nullopt;
+        Supplementary::PropRefreshBits                                  refresh = 0;
     };
 
     class CIntValue : public IValue {

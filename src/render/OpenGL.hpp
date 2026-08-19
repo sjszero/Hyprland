@@ -6,13 +6,12 @@
 #include "../helpers/time/Timer.hpp"
 #include "../helpers/math/Math.hpp"
 #include "../helpers/Format.hpp"
-#include "../helpers/DeformableMesh.hpp"
 #include "../helpers/sync/SyncTimeline.hpp"
 #include <GLES3/gl32.h>
 #include <cstdint>
 #include <list>
-#include <optional>
 #include <string>
+#include <stack>
 #include <map>
 
 #include <cairo/cairo.h>
@@ -51,8 +50,6 @@ namespace Config {
 }
 
 namespace Render::GL {
-
-    CBox resolveBlurUV(const CBox& destinationBox, const Vector2D& textureSize);
 
     struct SVertex {
         float x, y; // position
@@ -108,14 +105,13 @@ namespace Render::GL {
         CRegion                  finalDamage; // damage used for final off -> main
 
         Render::SRenderModifData renderModif;
-        float                    mouseZoomFactor            = 1.f;
-        bool                     mouseZoomUseMouse          = true; // true by default
-        bool                     useNearestNeighbor         = false;
-        bool                     blockScreenShader          = false;
-        bool                     simplePass                 = false;
-        bool                     transformDamage            = true;
-        bool                     noSimplify                 = false;
-        bool                     renderingTransformedSource = false;
+        float                    mouseZoomFactor    = 1.f;
+        bool                     mouseZoomUseMouse  = true; // true by default
+        bool                     useNearestNeighbor = false;
+        bool                     blockScreenShader  = false;
+        bool                     simplePass         = false;
+        bool                     transformDamage    = true;
+        bool                     noSimplify         = false;
 
         Vector2D                 primarySurfaceUVTopLeft     = Vector2D(-1, -1);
         Vector2D                 primarySurfaceUVBottomRight = Vector2D(-1, -1);
@@ -167,6 +163,7 @@ namespace Render::GL {
             bool                   blockBlurOptimization = false;
             SP<ITexture>           blurredBG;
             SP<ITexture>           blurAlphaMatte;
+
             const CRegion*         damage        = nullptr;
             SP<CWLSurfaceResource> surface       = nullptr;
             float                  a             = 1.F;
@@ -207,7 +204,6 @@ namespace Render::GL {
 
         void renderRect(const CBox&, const CHyprColor&, SRectRenderData data);
         void renderTexture(SP<ITexture>, const CBox&, STextureRenderData data);
-        void renderTextureMesh(SP<ITexture>, const CBox&, const std::vector<SMeshRenderVertex>& vertices, STextureRenderData data);
         void renderRoundedShadow(const CBox&, int round, float roundingPower, int range, const Config::CGradientValueData& color, float a = 1.0);
         void renderRoundedShadow(const CBox&, int round, float roundingPower, int range, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2,
                                  float lerp, float a = 1.0);
@@ -247,7 +243,6 @@ namespace Render::GL {
         WP<CShader>                               useShader(WP<CShader> prog);
 
         bool                                      explicitSyncSupported();
-        bool                                      fp16Supported();
         WP<CShader>                               getShaderVariant(Render::ePreparedFragmentShader frag, Render::ShaderFeatureFlags features = 0);
 
         bool                                      m_shadersInitialized = false;
@@ -281,7 +276,6 @@ namespace Render::GL {
 
         struct {
             bool EXT_read_format_bgra               = false;
-            bool EXT_color_buffer_half_float        = false;
             bool EXT_image_dma_buf_import           = false;
             bool EXT_image_dma_buf_import_modifiers = false;
             bool KHR_context_flush_control          = false;
@@ -317,8 +311,7 @@ namespace Render::GL {
         std::array<bool, CAP_STATUS_END> m_capStatus = {};
 
         std::vector<SDRMFormat>          m_drmFormats;
-        bool                             m_hasModifiers  = false;
-        bool                             m_fp16Supported = false;
+        bool                             m_hasModifiers = false;
 
         int                              m_drmFD = -1;
         std::string                      m_extensions;
@@ -357,7 +350,7 @@ namespace Render::GL {
         void             renderRectInternal(const CBox&, const CHyprColor&, const SRectRenderData& data);
         void             renderRectWithBlurInternal(const CBox&, const CHyprColor&, const SRectRenderData& data);
         void             renderRectWithDamageInternal(const CBox&, const CHyprColor&, const SRectRenderData& data);
-        WP<CShader>      renderScreenShaderInternal();
+        WP<CShader>      renderToOutputInternal();
         WP<CShader>      renderToFBInternal(SP<ITexture> tex, const STextureRenderData& data, eTextureType texType, const CBox& newBox);
         void             renderTextureInternal(SP<ITexture>, const CBox&, const STextureRenderData& data);
         void             renderTextureWithBlurInternal(SP<ITexture>, const CBox&, const STextureRenderData& data);

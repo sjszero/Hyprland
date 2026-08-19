@@ -9,9 +9,8 @@
 
 namespace Config::Values {
     struct SStringValueOptions {
-        std::function<std::expected<void, std::string>(const Config::STRING&)> validator         = {};
-        Supplementary::PropRefreshBits                                         refresh           = 0;
-        const char*                                                            deprecationNotice = nullptr;
+        std::function<std::expected<void, std::string>(const Config::STRING&)> validator = {};
+        Supplementary::PropRefreshBits                                         refresh   = 0;
     };
 
     class CStringValue : public IValue {
@@ -20,12 +19,11 @@ namespace Config::Values {
 
         virtual ~CStringValue() = default;
 
-        virtual const std::type_info*                                          underlying() const override;
-        virtual void                                                           commence() override;
+        virtual const std::type_info* underlying() const override;
+        virtual void                  commence() override;
 
-        Config::STRING                                                         value() const;
-        Config::STRING                                                         defaultVal() const;
-        std::function<std::expected<void, std::string>(const Config::STRING&)> validator() const;
+        Config::STRING                value() const;
+        Config::STRING                defaultVal() const;
 
       private:
         CConfigValue<Config::STRING>                                        m_val;

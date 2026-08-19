@@ -12,10 +12,10 @@ Forwarded: not-needed
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 36195ca..d526aa6 100644
+index 3c525f6..4fcc159 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -660,7 +660,7 @@ install(FILES ${MANPAGES} DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+@@ -679,7 +679,7 @@ install(FILES ${MANPAGES} DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
  
  # pkgconfig entry
  install(FILES ${CMAKE_BINARY_DIR}/hyprland.pc

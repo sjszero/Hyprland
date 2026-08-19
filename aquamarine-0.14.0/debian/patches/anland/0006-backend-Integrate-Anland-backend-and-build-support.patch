@@ -159,7 +159,7 @@ index 0000000..7dc9ab8
 +        void*                               m_display = nullptr;
 +        int                                 m_bufReadyFd = -1;
 +        int                                 m_renderNodeFd = -1;
-+        int                                 m_heartbeatTimerFd = -1; /* 200ms periodic heartbeat, always running */
++        int                                 m_heartbeatTimerFd = -1; /* 50ms periodic heartbeat, always running */
 +        std::chrono::steady_clock::time_point m_lastFrameTime;      /* last trigger_refresh() timestamp */
 +        int                                 m_inputDataFd = -1; /* dup of data_fd for event-loop polling */
 +        bool                                m_inFallback = true;
@@ -290,7 +290,7 @@ index 0000000..0270711
 +
 +CAnlandBackend::CAnlandBackend(CSharedPointer<CBackend> backend)
 +    : m_backend(backend) {
-+    /* Create the 200ms heartbeat timerfd immediately. It fires every 200ms
++    /* Create the 50ms heartbeat timerfd immediately. It fires every 50ms
 +     * regardless of fallback state. When not in fallback, it probes the input
 +     * data fd to detect disconnection (since the event loop's WL_EVENT_READABLE
 +     * registration does NOT fire on POLLHUP alone). When in fallback, it drives
@@ -298,8 +298,8 @@ index 0000000..0270711
 +    m_heartbeatTimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 +    if (m_heartbeatTimerFd >= 0) {
 +        struct itimerspec ts = {
-+            .it_interval = { .tv_sec = 0, .tv_nsec = 200000000 }, /* 200ms */
-+            .it_value    = { .tv_sec = 0, .tv_nsec = 200000000 },
++            .it_interval = { .tv_sec = 0, .tv_nsec = 50000000 }, /* 50ms */
++            .it_value    = { .tv_sec = 0, .tv_nsec = 50000000 },
 +        };
 +        timerfd_settime(m_heartbeatTimerFd, 0, &ts, nullptr);
 +    }

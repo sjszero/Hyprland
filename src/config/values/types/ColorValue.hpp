@@ -6,8 +6,7 @@
 
 namespace Config::Values {
     struct SColorValueOptions {
-        Supplementary::PropRefreshBits refresh           = 0;
-        const char*                    deprecationNotice = nullptr;
+        Supplementary::PropRefreshBits refresh = 0;
     };
 
     class CColorValue : public IValue {

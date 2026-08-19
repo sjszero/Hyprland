@@ -38,8 +38,10 @@ class CTexPassElement : public IPassElement {
         float                  blurA    = 1.F;
         float                  overallA = 1.F;
         CRegion                damage;
-        int                    round         = 0;
-        float                  roundingPower = 2.0f;
+        int                    round               = 0;
+        float                  roundingPower       = 2.0f;
+        bool                   flipEndFrame        = false;
+        bool                   useMirrorProjection = false;
         CBox                   clipBox;
         bool                   blur           = false;
         bool                   forceBlurBlend = false;
@@ -62,6 +64,7 @@ class CTexPassElement : public IPassElement {
 
         SP<Render::ITexture>   blurredBG;
         SP<Render::ITexture>   blurAlphaMatte;
+
         SMotionBlurData        motionBlur;
     };
 

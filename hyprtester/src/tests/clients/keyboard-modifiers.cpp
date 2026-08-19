@@ -7,7 +7,6 @@
 #include <hyprutils/os/Process.hpp>
 
 #include <optional>
-#include <format>
 #include <sys/poll.h>
 #include <csignal>
 #include <thread>
@@ -35,7 +34,7 @@ namespace {
 
 CClient::CClient() {
     Tests::killAllWindows();
-    this->proc = makeShared<CProcess>(std::format("{}/keyboard-modifiers", binaryDir), std::vector<std::string>{});
+    this->proc = makeShared<CProcess>(binaryDir + "/keyboard-modifiers", std::vector<std::string>{});
 
     this->proc->addEnv("WAYLAND_DISPLAY", WLDISPLAY);
 

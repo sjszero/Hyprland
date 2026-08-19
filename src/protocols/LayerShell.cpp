@@ -83,7 +83,7 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
     });
 
     m_resource->setSetSize([this](CZwlrLayerSurfaceV1* r, uint32_t x, uint32_t y) {
-        markPending(STATE_SIZE);
+        m_pending.committed |= STATE_SIZE;
         m_pending.desiredSize = {sc<int>(x), sc<int>(y)};
     });
 
@@ -93,17 +93,17 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
             return;
         }
 
-        markPending(STATE_ANCHOR);
+        m_pending.committed |= STATE_ANCHOR;
         m_pending.anchor = anchor;
     });
 
     m_resource->setSetExclusiveZone([this](CZwlrLayerSurfaceV1* r, int32_t zone) {
-        markPending(STATE_EXCLUSIVE);
+        m_pending.committed |= STATE_EXCLUSIVE;
         m_pending.exclusive = zone;
     });
 
     m_resource->setSetMargin([this](CZwlrLayerSurfaceV1* r, int32_t top, int32_t right, int32_t bottom, int32_t left) {
-        markPending(STATE_MARGIN);
+        m_pending.committed |= STATE_MARGIN;
         m_pending.margin = {left, right, top, bottom};
     });
 
@@ -113,7 +113,7 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
             return;
         }
 
-        markPending(STATE_INTERACTIVITY);
+        m_pending.committed |= STATE_INTERACTIVITY;
         m_pending.interactivity = kbi;
     });
 
@@ -149,7 +149,7 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
             return;
         }
 
-        markPending(STATE_LAYER);
+        m_pending.committed |= STATE_LAYER;
         m_pending.layer = sc<zwlrLayerShellV1Layer>(layer);
     });
 
@@ -164,7 +164,7 @@ CLayerShellResource::CLayerShellResource(SP<CZwlrLayerSurfaceV1> resource_, SP<C
             return;
         }
 
-        markPending(STATE_EDGE);
+        m_pending.committed |= STATE_EDGE;
         m_pending.exclusiveEdge = anchor;
     });
 }
@@ -177,12 +177,6 @@ CLayerShellResource::~CLayerShellResource() {
 
 bool CLayerShellResource::good() {
     return m_resource->resource();
-}
-
-void CLayerShellResource::markPending(eCommittedState state) {
-    m_pending.committed |= state;
-    if (m_surface)
-        m_surface->m_pending.updated.bits.layershell = true;
 }
 
 void CLayerShellResource::sendClosed() {

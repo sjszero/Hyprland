@@ -98,9 +98,10 @@ void CGLFramebuffer::bind() {
     }
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fb);
-    if (g_pHyprOpenGL)
-        g_pHyprOpenGL->setViewport(0, 0, m_size.x, m_size.y);
-    else
+    if (g_pHyprOpenGL) {
+        const auto& size = g_pHyprRenderer->m_renderData.pMonitor ? g_pHyprRenderer->m_renderData.pMonitor->m_pixelSize : m_size;
+        g_pHyprOpenGL->setViewport(0, 0, size.x, size.y);
+    } else
         glViewport(0, 0, m_size.x, m_size.y);
 }
 
@@ -255,10 +256,7 @@ void CGLFramebuffer::invalidate(const std::vector<GLenum>& attachments) {
     if (!isAllocated())
         return;
 
-    static const auto PFBINVALIDATE = CConfigValue<Config::INTEGER>("debug:invalidate_buffers");
-    if (*PFBINVALIDATE)
-        glInvalidateFramebuffer(GL_FRAMEBUFFER, attachments.size(), attachments.data());
-
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, attachments.size(), attachments.data());
     m_cleared = false;
 }
 

@@ -1,0 +1,54 @@
+From: Anland Hyprland Maintainers <anland@example.invalid>
+Date: Sat, 16 Aug 2026 17:20:00 +0800
+Subject: anland: apply consumer geometry changes on rotation and resize
+
+Port Niri Anland geometry synchronization: update the current output mode and
+notify Hyprland only after the Android consumer reconnects with a changed
+DMA-BUF geometry.
+
+---
+--- a/src/backend/anland/AnlandBackend.cpp
++++ b/src/backend/anland/AnlandBackend.cpp
+@@ -386,28 +386,34 @@
+                     }
+ 
+                     /* Re-read screen dimensions from first dmabuf info */
++                    bool geometryChanged = false;
+                     if (m_haveDmabufs) {
+                         struct buf_info info;
+                         if (::get_dmabuf_info_at(ctx, 0, &info) == 0 && info.width > 0 && info.height > 0) {
++                            geometryChanged = m_screenWidth != (uint32_t)info.width || m_screenHeight != (uint32_t)info.height;
+                             m_screenWidth  = (uint32_t)info.width;
+                             m_screenHeight = (uint32_t)info.height;
+                             m_backend->log(AQ_LOG_DEBUG, std::format("anland: screen dimensions updated to {}x{} after reconnect", (uint32_t)info.width, (uint32_t)info.height));
+                         }
+                     }
+ 
+-                    /* Update output mode */
++                    /* Niri updates its output current/preferred mode and damage tracker
++                     * when Android rotates. Commit Aquamarine's new mode, then notify
++                     * Hyprland so it recalculates pixel size, transform and damage. */
+                     if (!m_outputs.empty()) {
+                         auto output = m_outputs[0];
+                         output->modes.clear();
+-                        output->modes.push_back(makeShared<SOutputMode>(
++                        auto mode = makeShared<SOutputMode>(
+                             Vector2D((double)m_screenWidth, (double)m_screenHeight),
+-                            (int)m_screenRefresh, true));
++                            (int)m_screenRefresh, true);
++                        output->modes.push_back(mode);
++                        output->state->setMode(mode);
+ 
+-                        /* Emit state event with new size so Hyprland's CMonitor
+-                         * updates its pixel size, transforms, and damage region. */
+-                        output->events.state.emit(IOutput::SStateEvent{
+-                            .size = Vector2D((double)m_screenWidth, (double)m_screenHeight),
+-                        });
++                        if (geometryChanged) {
++                            output->events.state.emit(IOutput::SStateEvent{
++                                .size = Vector2D((double)m_screenWidth, (double)m_screenHeight),
++                            });
++                        }
+                     }
+ 
+                     /* Rebuild allocator */

@@ -1,0 +1,127 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Tue, 19 Aug 2026 12:00:00 +0800
+Subject: [PATCH] hyprgrass: adapt clean v0.8.2 config handles for Hyprland 0.56 Lua API
+
+Keep the v0.8.2 source baseline unchanged; this Debian patch maps plugin
+configuration access to Hyprland 0.56 Lua configuration values.
+
+Forwarded: not-needed
+---
+--- a/third_party/hyprgrass/src/GestureManager.cpp
++++ b/third_party/hyprgrass/src/GestureManager.cpp
+@@ -92,12 +92,12 @@
+ }
+ 
+ GestureManager::GestureManager() : IGestureManager(std::make_unique<HyprLogger>()) {
+-    static auto const PSENSITIVITY     = g_config->sensitivity;
+-    static auto const LONG_PRESS_DELAY = g_config->longPressDelay;
+-    static auto const EDGE_MARGIN      = g_config->edgeMargin;
+-    const auto sensitivity             = PSENSITIVITY->m_val.ptr();
+-    const auto longPressDelay          = LONG_PRESS_DELAY->m_val.ptr();
+-    const auto margin                  = EDGE_MARGIN->m_val.ptr();
++    static auto const PSENSITIVITY     = CConfigValue<Config::FLOAT>("plugin:hyprgrass:sensitivity");
++    static auto const LONG_PRESS_DELAY = CConfigValue<Config::INTEGER>("plugin:hyprgrass:long_press_delay");
++    static auto const EDGE_MARGIN      = CConfigValue<Config::INTEGER>("plugin:hyprgrass:edge_margin");
++    const auto sensitivity             = PSENSITIVITY.ptr();
++    const auto longPressDelay          = LONG_PRESS_DELAY.ptr();
++    const auto margin                  = EDGE_MARGIN.ptr();
+ 
+     this->addEdgeSwipeGesture(SWIPE_THRESHOLD, SWIPE_INCORRECT_DRAG_TOLERANCE, sensitivity, longPressDelay, margin);
+     // TODO: should I use SWIPE_INCORRECT_DRAG_TOLERANCE instead?
+@@ -121,9 +121,9 @@
+ }
+ 
+ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
+-    static auto const WORKSPACE_SWIPE_FINGERS = g_config->workspaceSwipeFingers;
+-    static auto const WORKSPACE_SWIPE_EDGE    = g_config->workspaceSwipeEdge;
+-    static auto const RESIZE_LONG_PRESS       = g_config->resizeOnBorder;
++    static auto const WORKSPACE_SWIPE_FINGERS = CConfigValue<Config::INTEGER>("plugin:hyprgrass:workspace_swipe_fingers");
++    static auto const WORKSPACE_SWIPE_EDGE    = CConfigValue<std::string>("plugin:hyprgrass:workspace_swipe_edge");
++    static auto const RESIZE_LONG_PRESS       = CConfigValue<Config::BOOL>("plugin:hyprgrass:resize_on_border_long_press");
+ 
+     static auto PBORDERSIZE       = CConfigValue<Config::INTEGER>("general:border_size");
+     static auto PBORDERGRABEXTEND = CConfigValue<Config::INTEGER>("general:extend_border_grab_area");
+@@ -131,14 +131,14 @@
+ 
+     Log::logger->log(Log::DEBUG, "[hyprgrass] Drag gesture begin: {}", gev.to_string());
+ 
+-    auto const workspace_swipe_edge_str = WORKSPACE_SWIPE_EDGE->value();
++    auto const workspace_swipe_edge_str = *WORKSPACE_SWIPE_EDGE;
+ 
+     switch (gev.type) {
+         case GestureType::SWIPE: {
+             if (this->trackpadGestureBegin(gev))
+                 return true;
+ 
+-            if (WORKSPACE_SWIPE_FINGERS->value() != gev.finger_count) {
++            if (*WORKSPACE_SWIPE_FINGERS != gev.finger_count) {
+                 return false;
+             }
+ 
+@@ -174,7 +174,7 @@
+                        FindGestureResult::NONE;
+             }
+ 
+-            if (RESIZE_LONG_PRESS->value() && gev.finger_count == 1) {
++            if (*RESIZE_LONG_PRESS && gev.finger_count == 1) {
+                 const auto BORDER_GRAB_AREA = *PBORDERSIZE + *PBORDERGRABEXTEND;
+ 
+                 // kind of a hack: this is the window detected from previous touch events
+@@ -573,9 +573,9 @@
+ }
+ 
+ void GestureManager::sendCancelEventsToWindows() {
+-    static auto const SEND_CANCEL = g_config->sendCancel;
++    static auto const SEND_CANCEL = CConfigValue<Config::BOOL>("plugin:hyprgrass:debug:send_cancel");
+ 
+-    if (!SEND_CANCEL->value()) {
++    if (!*SEND_CANCEL) {
+         return;
+     }
+ 
+@@ -589,7 +589,7 @@
+ 
+ // @return whether or not to inhibit further actions
+ bool GestureManager::onTouchDown(ITouch::SDownEvent ev) {
+-    static auto const SEND_CANCEL = g_config->sendCancel;
++    static auto const SEND_CANCEL = CConfigValue<Config::BOOL>("plugin:hyprgrass:debug:send_cancel");
+ 
+     auto monitor =
+         State::monitorState()->query().name(!ev.device->m_boundOutput.empty() ? ev.device->m_boundOutput : "").run();
+@@ -620,7 +620,7 @@
+         this->activeTrackpadGesture = nullptr;
+     }
+ 
+-    if (!eventForwardingInhibited() && SEND_CANCEL->value() && g_pInputManager->m_touchData.touchFocusSurface) {
++    if (!eventForwardingInhibited() && *SEND_CANCEL && g_pInputManager->m_touchData.touchFocusSurface) {
+         // remember which surfaces were touched, to later send cancel events
+         const auto surface = g_pInputManager->m_touchData.touchFocusSurface;
+ 
+@@ -653,7 +653,7 @@
+ }
+ 
+ bool GestureManager::onTouchUp(ITouch::SUpEvent ev) {
+-    static auto const SEND_CANCEL = g_config->sendCancel;
++    static auto const SEND_CANCEL = CConfigValue<Config::BOOL>("plugin:hyprgrass:debug:send_cancel");
+ 
+     wf::touch::point_t lift_off_pos;
+     try {
+@@ -670,7 +670,7 @@
+     };
+ 
+     const auto BLOCK = IGestureManager::onTouchUp(gesture_event);
+-    if (SEND_CANCEL->value()) {
++    if (*SEND_CANCEL) {
+         const auto surface = g_pInputManager->m_touchData.touchFocusSurface;
+ 
+         if (!surface.valid()) {
+--- a/third_party/hyprgrass/src/main.cpp
++++ b/third_party/hyprgrass/src/main.cpp
+@@ -187,6 +187,7 @@
+     }
+ 
+     int ref      = luaL_ref(L, LUA_REGISTRYINDEX);
++    Config::Lua::mgr()->registerLuaRef(ref);
+     bind.handler = "__lua";
+     bind.arg     = std::to_string(ref);
+ 

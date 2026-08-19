@@ -198,9 +198,9 @@ std::vector<SP<IValue>> Values::getConfigValues() {
          */
 
         MS<Int>("decoration:rounding", "rounded corners' radius (in layout px)", 0,
-                {.min = 0, .max = 40, .refresh = Supplementary::REFRESH_WINDOW_STATES | Supplementary::REFRESH_BLUR_FB}),
+                {.min = 0, .max = 20, .refresh = Supplementary::REFRESH_WINDOW_STATES | Supplementary::REFRESH_BLUR_FB}),
         MS<Float>("decoration:rounding_power", "rounding power of corners (2 is a circle)", 2,
-                  {.min = 1, .max = 10, .refresh = Supplementary::REFRESH_WINDOW_STATES | Supplementary::REFRESH_BLUR_FB}),
+                  {.min = 2, .max = 10, .refresh = Supplementary::REFRESH_WINDOW_STATES | Supplementary::REFRESH_BLUR_FB}),
         MS<Float>("decoration:active_opacity", "opacity of active windows.", 1, {.min = 0, .max = 1, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Float>("decoration:inactive_opacity", "opacity of inactive windows.", 1, {.min = 0, .max = 1, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Float>("decoration:fullscreen_opacity", "opacity of fullscreen windows.", 1, {.min = 0, .max = 1, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
@@ -214,7 +214,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
                      {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Vec2>("decoration:shadow:offset", "shadow's rendering offset.", Config::VEC2{},
                  {.validator = vec2Range(-250, -250, 250, 250), .refresh = Supplementary::REFRESH_WINDOW_STATES}),
-        MS<Float>("decoration:shadow:scale", "shadow's scale.", 1, {.min = 0.05, .max = 2, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
+        MS<Float>("decoration:shadow:scale", "shadow's scale.", 1, {.min = 0, .max = 1, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Bool>("decoration:glow:enabled", "enable inner glow on windows", false, {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Int>("decoration:glow:range", "glow range (size) in layout px", 10, {.min = 0, .max = 100, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Int>("decoration:glow:render_power", "in what power to render the falloff (more power, the faster the falloff)", 3,
@@ -256,14 +256,6 @@ std::vector<SP<IValue>> Values::getConfigValues() {
 
         MS<Bool>("decoration:motion_blur:enabled", "enable motion blur for moving and resizing windows", false, {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
         MS<Int>("decoration:motion_blur:samples", "amount of samples used for motion blur", 7, {.min = 1, .max = 64, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
-        MS<Bool>("decoration:wobble:enabled", "enable wobble deformation for moving and resizing windows", false, {.refresh = Supplementary::REFRESH_WINDOW_STATES}),
-        MS<Int>("decoration:wobble:mesh", "amount of wobble mesh vertices per edge", 12, {.min = 2, .max = 32, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
-        MS<Float>("decoration:wobble:stiffness", "spring stiffness for wobble deformation", 200, {.min = 0.0001, .max = 1000}),
-        MS<Float>("decoration:wobble:damping", "spring damping for wobble deformation", 12, {.min = 0, .max = 1000}),
-        MS<Float>("decoration:wobble:mass", "spring mass for wobble deformation", 1, {.min = 0.0001, .max = 1000}),
-        MS<Float>("decoration:wobble:intensity", "wobble deformation impulse multiplier", 0.2, {.min = 0, .max = 2}),
-        MS<Float>("decoration:wobble:value_epsilon", "position epsilon below which wobble is considered stable", 0.25, {.min = 0, .max = 100}),
-        MS<Float>("decoration:wobble:velocity_epsilon", "velocity epsilon below which wobble is considered stable", 2, {.min = 0, .max = 1000}),
 
         /*
          * animations:
@@ -451,16 +443,16 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("group:groupbar:gradients", "enables gradients", false),
         MS<Int>("group:groupbar:height", "height of the groupbar", 14, {.min = 1, .max = 64}),
         MS<Int>("group:groupbar:indicator_gap", "height of the gap between the groupbar indicator and title", 0, {.min = 0, .max = 64}),
-        MS<Int>("group:groupbar:indicator_height", "height of the groupbar indicator", 3, {.min = 0, .max = 64}),
+        MS<Int>("group:groupbar:indicator_height", "height of the groupbar indicator", 3, {.min = 1, .max = 64}),
         MS<Bool>("group:groupbar:stacked", "render the groupbar as a vertical stack", false),
         MS<Int>("group:groupbar:priority", "sets the decoration priority for groupbars", 3, {.min = 0, .max = 6}),
         MS<Bool>("group:groupbar:render_titles", "whether to render titles in the group bar decoration", true),
         MS<Bool>("group:groupbar:scrolling", "whether scrolling in the groupbar changes group active window", true),
         MS<Bool>("group:groupbar:middle_click_close", "whether middle clicking the groupbar closes the clicked window", true),
-        MS<Int>("group:groupbar:rounding", "how much to round the groupbar", 1, {.min = 0, .max = 40}),
-        MS<Float>("group:groupbar:rounding_power", "rounding power of groupbar corners (2 is a circle)", 2, {.min = 1, .max = 10}),
+        MS<Int>("group:groupbar:rounding", "how much to round the groupbar", 1, {.min = 0, .max = 20}),
+        MS<Float>("group:groupbar:rounding_power", "rounding power of groupbar corners (2 is a circle)", 2, {.min = 2, .max = 10}),
         MS<Int>("group:groupbar:gradient_rounding", "how much to round the groupbar gradient", 2, {.min = 0, .max = 20}),
-        MS<Float>("group:groupbar:gradient_rounding_power", "rounding power of groupbar gradient corners (2 is a circle)", 2, {.min = 1, .max = 10}),
+        MS<Float>("group:groupbar:gradient_rounding_power", "rounding power of groupbar gradient corners (2 is a circle)", 2, {.min = 2, .max = 10}),
         MS<Bool>("group:groupbar:round_only_edges", "if yes, will only round at the groupbar edges", true),
         MS<Bool>("group:groupbar:gradient_round_only_edges", "if yes, will only round at the groupbar gradient edges", true),
         MS<Color>("group:groupbar:text_color", "color for window titles in the groupbar", 0xffffffff),
@@ -525,8 +517,6 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("misc:screencopy_force_8b", "forces 8 bit screencopy", true),
         MS<Bool>("misc:disable_scale_notification", "disables notification popup when a monitor fails to set a suitable scale", false),
         MS<Bool>("misc:size_limits_tiled", "whether to apply minsize and maxsize rules to tiled windows", false),
-        MS<Int>("misc:new_float_force_onscreen", "whether new floating windows must be placed fully/partially on-screen", 2),
-        MS<Int>("misc:float_force_onscreen", "whether existing floating windows must remain fully/partially on-screen", 0),
 
         /*
          * binds:
@@ -549,7 +539,6 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("binds:allow_pin_fullscreen", "Allows fullscreen to pinned windows, and restore their pinned status afterwards", false),
         MS<Int>("binds:drag_threshold", "Movement threshold in pixels for window dragging and c/g bind flags. 0 to disable.", 0,
                 {.min = 0, .max = std::numeric_limits<int>::max()}),
-        MS<Bool>("binds:drag_center_window", "If enabled, dragging a tiled or fullscreen window will center it on the cursor when it becomes floating.", true),
 
         /*
          * xwayland:
@@ -591,10 +580,6 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Int>("render:non_shader_cm_interop", "non_shader_cm interaction with ctm proto (hyprsunset and similar).", 2,
                 {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}}}),
         MS<Int>("render:fp16_sdr_tf", "Internal workbuffer transfer function for fp16 in SDR mode", 0, {.min = 0, .max = 1, .map = OptionMap{{"monitor", 0}, {"linear", 1}}}),
-        MS<Int>("render:not_shown_fifo_lock",
-                "Control fifo locking for not shown surfaces. always - use fifo lock for any surface, ignore_unfocused - ignore render_unfocused windows, never - skip locking "
-                "invisible surfaces",
-                0, {.min = 0, .max = 2, .map = OptionMap{{"always", 0}, {"ignore_unfocused", 1}, {"never", 2}}}),
 
         /*
          * cursor:
@@ -656,14 +641,10 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("debug:full_cm_proto", "claims support for all cm proto features (requires restart)", false),
         MS<Bool>("debug:ds_handle_same_buffer", "Special case for DS with unmodified buffer", true),
         MS<Bool>("debug:ds_handle_same_buffer_fifo", "Special case for DS with unmodified buffer unlocks fifo", true),
+        MS<Bool>("debug:fifo_pending_workaround", "Fifo workaround for empty pending list", false),
         MS<Bool>("debug:render_solitary_wo_damage", "Render solitary window with empty damage", false),
         MS<Bool>("debug:vfr", "controls the VFR status of Hyprland. Do not turn off unless debugging", true),
-        MS<Int>("debug:invalidate_buffers", "allow buffer invalidation.", 1, {.min = 0, .max = 1, .map = OptionMap{{"disable", 0}, {"enable", 1}}}),
-        MS<Int>("debug:invalidate_fp16", "allow fp16 buffer invalidation.", 1,
-                {.min               = 0,
-                 .max               = 2,
-                 .map               = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}},
-                 .deprecationNotice = "no longer does anything, use debug:invalidate_buffers instead."}),
+        MS<Int>("debug:invalidate_fp16", "allow fp16 buffer invalidation.", 1, {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}}}),
 
         /*
          * layout:
@@ -736,7 +717,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
         MS<Bool>("experimental:wp_cm_1_2", "Allow wp-cm-v1 version 2", true),
 
         /*
-		 * input_capture:
+		 * input_capture: 
 		 */
         MS<Bool>("input-capture:capture_modifiers", "If enabled, modifiers are also captured and sent to the program", false),
         MS<Bool>("input-capture:enforce_barriers", "If enabled, throw a wayland error when a invalid barrier is received", true),

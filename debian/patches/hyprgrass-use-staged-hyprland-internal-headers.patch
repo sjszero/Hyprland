@@ -1,0 +1,31 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Thu, 14 Aug 2026 15:30:00 +0800
+Subject: [PATCH] hyprgrass: use staged Hyprland internal header paths
+
+Hyprgrass is built against the exact staged Hyprland source package. Hyprland
+internal headers use both src-relative includes and generated protocol headers,
+so expose those two directories when HYPRLAND_HEADERS is used instead of an
+installed hyprland.pc dependency.
+
+Forwarded: not-needed
+---
+Index: Hyprland-local-test/third_party/hyprgrass/meson.build
+===================================================================
+--- Hyprland-local-test.orig/third_party/hyprgrass/meson.build
++++ Hyprland-local-test/third_party/hyprgrass/meson.build
+@@ -25,6 +25,8 @@ if not hyprland_headers.found()
+   endif
+ 
+   add_global_arguments('-I' + hyprland_src, language: 'cpp')
++  add_global_arguments('-I' + join_paths(hyprland_src, 'src'), language: 'cpp')
++  add_global_arguments('-I' + join_paths(hyprland_src, 'protocols'), language: 'cpp')
+ endif
+ 
+ if get_option('hyprgrass')
+@@ -45,4 +47,4 @@ hyprland_deps = [
+ ]
+ 
+ subdir('examples')
+-subdir('src')
++subdir('src')
+\ 文件末尾没有换行符

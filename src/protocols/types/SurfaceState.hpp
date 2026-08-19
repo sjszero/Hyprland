@@ -12,7 +12,6 @@ namespace Render {
 class CDRMSyncPointState;
 class CWLCallbackResource;
 class CPresentationFeedback;
-struct SReadableWaiter;
 
 enum eLockReason : uint8_t {
     LOCK_REASON_NONE  = 0,
@@ -41,7 +40,7 @@ inline eLockReason operator~(eLockReason a) {
 
 struct SSurfaceState {
     union {
-        uint32_t all = 0;
+        uint16_t all = 0;
         struct {
             bool buffer : 1;
             bool damage : 1;
@@ -56,12 +55,6 @@ struct SSurfaceState {
             bool frame : 1;
             bool fifo : 1;
             bool presentation : 1;
-            bool xdgshell : 1;
-            bool layershell : 1;
-            bool subsurface : 1;
-            bool alphaModifier : 1;
-            bool hyprlandSurface : 1;
-            bool backgroundEffect : 1;
         } bits;
     } updated;
 
@@ -99,18 +92,17 @@ struct SSurfaceState {
     Vector2D sourceSize();
 
     // drm syncobj protocol surface state
-    CDRMSyncPointState  acquire;
-    WP<SReadableWaiter> acquireWaiter;
-    eLockReason         lockMask = LOCK_REASON_NONE;
+    CDRMSyncPointState acquire;
+    eLockReason        lockMask = LOCK_REASON_NONE;
 
     // texture of surface content, used for rendering
     SP<Render::ITexture> texture;
     void                 updateSynchronousTexture(SP<Render::ITexture> lastTexture);
 
     // fifo
-    bool barrierSet            = false;
-    bool barrierWait           = false;
-    bool waitingOnPresentation = false;
+    bool barrierSet    = false;
+    bool surfaceLocked = false;
+    bool fifoScheduled = false;
 
     // commit timing
     std::optional<Time::steady_dur> pendingTimeout;
@@ -122,9 +114,4 @@ struct SSurfaceState {
     CRegion effectiveInputRegion() const;   // materializes the input region clipped to the current surface size
     void    updateFrom(SSurfaceState& ref); // updates this state based on a reference state.
     void    reset();                        // resets pending state after commit
-
-    bool    isLocked() const;
-    bool    fenceSignaled() const;
-    void    mergeFrom(SSurfaceState& ref);
-    void    cancelFenceWaiter();
 };

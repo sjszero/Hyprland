@@ -97,17 +97,15 @@ asan:
 format-check:
 	@find src hyprctl hyprpm start tests hyprtester -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
 		! -path "src/render/shaders/Shaders.hpp" \
-		! -path "hyprctl/hw-protocols/*" \
-		! -path "hyprtester/protocols/*" \
-		| xargs clang-format --dry-run --Werror
+		! -path "hyprctl/hw-protocols/*" | \
+		xargs clang-format --dry-run --Werror
 
 format-fix:
 	@find src hyprctl hyprpm start tests hyprtester -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
 		! -path "src/render/shaders/Shaders.hpp" \
-		! -path "hyprctl/hw-protocols/*" \
-		! -path "hyprtester/protocols/*" \
-		| xargs clang-format -i
+		! -path "hyprctl/hw-protocols/*" | \
+		xargs clang-format -i
 
 test:
 	$(MAKE) debug
-	./build/hyprtester/hyprtester -c hyprtester/test.lua -b ./build/Hyprland -p hyprtester/plugin/hyprtestplugin.so $(TESTS)
+	./build/hyprtester/hyprtester -c hyprtester/test.lua -b ./build/Hyprland -p hyprtester/plugin/hyprtestplugin.so

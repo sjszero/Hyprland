@@ -23,17 +23,13 @@ builddir = build
 override_dh_auto_configure:
 	dh_auto_configure -- $(EXTRA_CMAKE_ARGS)
 
-# Build the vendored Hyprgrass against the headers and ABI produced by this
-# exact Hyprland source package, then stage it in the hyprland binary package.
-# Plugins cannot safely be shared across arbitrary Hyprland versions.
+# Build the staged Hyprgrass source against headers from this exact Hyprland
+# package. build-anland.sh imports it only into the native staging tree.
 override_dh_auto_install:
 	dh_auto_install
-	# Make both <hyprland/src/...> and legacy "src/..." includes resolve to this
-	# exact source tree. PKG_CONFIG_LIBDIR is deliberately restricted to packaged
-	# system dependencies, avoiding an unrelated /usr/local hyprland.pc.
 	ln -sfn . hyprland
 	PKG_CONFIG_LIBDIR=/usr/lib/${DEB_HOST_MULTIARCH}/pkgconfig:/usr/share/pkgconfig \
-	HYPRLAND_HEADERS=$(CURDIR) \
+		HYPRLAND_HEADERS=$(CURDIR) \
 		meson setup build-hyprgrass third_party/hyprgrass --prefix=/usr --libdir=lib/${DEB_HOST_MULTIARCH} -Dhyprgrass=true
 	meson compile -C build-hyprgrass
 	install -D -m 0755 build-hyprgrass/src/libhyprgrass.so \
@@ -41,12 +37,6 @@ override_dh_auto_install:
 
 override_dh_dwz:
 	dh_dwz -XHyprland # Skipping dwz, compression not beneficial on Hyprland
-
-# The build host may contain stray /usr/lib copies of Aquamarine (for example
-# from a prior local build).  Restrict shlibdeps to Debian's multiarch library
-# directory, where libaquamarine13 installs its shlibs metadata.
-override_dh_shlibdeps:
-	dh_shlibdeps -l/usr/lib/${DEB_HOST_MULTIARCH}
 
 override_dh_gencontrol:
 	. debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/hyprland/debian-abi-helper && \

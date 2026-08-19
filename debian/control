@@ -5,13 +5,13 @@ Uploaders:
  Alan M Varghese (NyxTrail) <alan@digistorm.in>,
  Carl Keinath <carl.keinath@gmail.com>,
  Chow Loong Jin <hyperair@debian.org>,
-  Alex Myczko <tar@debian.org>
+ Alex Myczko <tar@debian.org>
 Build-Depends:
- libaquamarine-dev (>= 0.14.0),
+ libaquamarine-dev (>= 0.9.3),
  cmake,
  cpio,
  debhelper-compat (= 13),
- hyprland-protocols (>= 0.6.4),
+ hyprland-protocols (>= 0.7.0),
  hyprwayland-scanner (>= 0.3.10),
  hyprwire-scanner,
  libcairo-dev,
@@ -19,6 +19,7 @@ Build-Depends:
  libxkbcommon-dev (>= 1.11.0),
  libegl-dev,
  libegl1-mesa-dev,
+ libeis-dev,
  libgbm-dev,
  libglaze-dev (>= 7.0.0),
  libgles-dev,
@@ -26,10 +27,10 @@ Build-Depends:
  glslang-tools,
  libhyprlang-dev (>= 0.6.7),
  libhyprcursor-dev (>= 0.1.7),
- libhyprutils-dev (>= 0.13.1),
+ libhyprutils-dev (>= 0.14.0),
  libhyprwire-dev,
  libhyprgraphics-dev (>= 0.5.1),
- libinput-dev (>= 1.28),
+ libinput-dev (>= 1.29),
  liblcms2-dev,
  liblua5.5-dev,
  libmuparser-dev,
@@ -50,7 +51,7 @@ Build-Depends:
  libxcb-errors-dev,
  libssl-dev,
  pkgconf,
- wayland-protocols (>= 1.48),
+ wayland-protocols (>= 1.49),
  libxcursor-dev,
  xwayland,
  xxd
@@ -63,14 +64,12 @@ Package: hyprland
 Architecture: any
 Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
- polkitd, binutils, libgl1-mesa-dri,
- pipewire, pipewire-pulse, wireplumber, dbus-user-session,
- network-manager, acl
+ polkitd, binutils, libgl1-mesa-dri
 Provides: ${hyprland:Provides}
 Recommends:
  libcap2-bin,
  xwayland,
- xdg-desktop-portal-hyprland
+ xdg-desktop-portal-hyprland,
 Description: Dynamic tiling Wayland compositor
  Hyprland is a 100% independent, dynamic tiling Wayland compositor that doesn't
  sacrifice on its looks.
@@ -96,24 +95,6 @@ Description: Dynamic tiling Wayland compositor
   - Powerful window/monitor/layer rules
   - Socket-based IPC
   - Native IME and Input Panels Support
-
-Package: hyprland-anland-desktop
-Architecture: arm64
-Multi-Arch: foreign
-Depends: ${misc:Depends},
- hyprland (= ${binary:Version}),
- dms,
- xwayland,
- xdg-desktop-portal,
- xdg-desktop-portal-hyprland,
- xdg-desktop-portal-gtk
-Description: Complete Anland Hyprland touch desktop
- This metapackage installs the complete ARM64 Anland desktop session: the
- Debian-patched Hyprland compositor, Dank Material Shell, Xwayland, desktop
- portals, and their runtime dependencies.
- .
- Install it together with the patched xwayland .deb produced by this source
- tree, then start the session with start-hyprland-anland.
 
 Package: hyprland-backgrounds
 Architecture: all
@@ -153,7 +134,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends:
-  libaquamarine-dev (>= 0.14.0),
+ libaquamarine-dev (>= 0.9.3),
  libcairo2-dev | libcairo-dev,
  libegl-dev,
  libgles-dev,
@@ -162,7 +143,7 @@ Depends:
  libhyprlang-dev (>= 0.6.7),
  libhyprutils-dev (>= 0.13.1),
  libdrm-dev,
- libinput-dev (>= 1.28),
+ libinput-dev (>= 1.29),
  liblua5.5-dev,
  libwayland-dev (>= 1.22.90),
  libxcb1-dev,
@@ -205,3 +186,21 @@ Description: Development files for Hyprland
  .
  This package contains header files for developing plugins
  for Hyprland.
+
+Package: hyprland-anland-desktop
+Architecture: arm64
+Multi-Arch: foreign
+Depends: ${misc:Depends},
+ hyprland (= ${binary:Version}),
+ dms,
+ xwayland,
+ xdg-desktop-portal,
+ xdg-desktop-portal-hyprland,
+ xdg-desktop-portal-gtk
+Description: Complete Anland Hyprland touch desktop
+ This metapackage installs the complete ARM64 Anland desktop session: the
+ Debian-patched Hyprland compositor, Dank Material Shell, Xwayland, desktop
+ portals, and their runtime dependencies.
+ .
+ Install it together with the patched xwayland .deb produced by this source
+ tree, then start the session with start-hyprland-anland.

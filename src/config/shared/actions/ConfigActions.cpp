@@ -11,7 +11,7 @@
 #include "../../../managers/SeatManager.hpp"
 #include "../../../pointer/PointerManager.hpp"
 #include "../../../pointer/PointerController.hpp"
-#include "../../../ipc/s2/S2.hpp"
+#include "../../../managers/EventManager.hpp"
 #include "../../../managers/KeybindManager.hpp"
 #include "../../../managers/input/InputManager.hpp"
 #include "../../../managers/fullscreen/FullscreenController.hpp"
@@ -262,7 +262,7 @@ ActionResult Actions::pinWindow(eTogglableAction action, std::optional<PHLWINDOW
     PWORKSPACE->m_lastFocusedWindow =
         Desktop::viewState()->hitTest().windowAt(g_pInputManager->getMouseCoordsInternal(), Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS);
 
-    IPC::Socket2::sock()->postEvent({.event = "pin", .data = std::format("{:x},{}", rc<uintptr_t>(window.get()), sc<int>(window->m_pinned))});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "pin", .data = std::format("{:x},{}", rc<uintptr_t>(window.get()), sc<int>(window->m_pinned))});
     Event::bus()->m_events.window.pin.emit(window);
 
     g_pHyprRenderer->damageWindow(window, true);
@@ -1266,7 +1266,7 @@ ActionResult Actions::forceIdle(float seconds) {
 }
 
 ActionResult Actions::event(const std::string& data) {
-    IPC::Socket2::sock()->postEvent({.event = "custom", .data = data});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "custom", .data = data});
     return {};
 }
 
@@ -1277,7 +1277,7 @@ ActionResult Actions::lockGroups(eTogglableAction action) {
         case TOGGLE_ACTION_DISABLE: g_pKeybindManager->m_groupsLocked = false; break;
     }
 
-    IPC::Socket2::sock()->postEvent({.event = "lockgroups", .data = g_pKeybindManager->m_groupsLocked ? "1" : "0"});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "lockgroups", .data = g_pKeybindManager->m_groupsLocked ? "1" : "0"});
     Desktop::globalWindowController()->updateAllWindowsDecorations();
 
     return {};
@@ -1317,7 +1317,7 @@ static void moveWindowIntoGroupHelper(PHLWINDOW pWindow, PHLWINDOW pWindowInDire
     Desktop::focusState()->fullWindowFocus(pWindow, Desktop::FOCUS_REASON_DISPATCH_MOVEWINDOWINTOGROUP);
     pWindow->warpCursor();
 
-    IPC::Socket2::sock()->postEvent({.event = "moveintogroup", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "moveintogroup", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
 }
 
 static void moveWindowOutOfGroupHelper(PHLWINDOW pWindow, Math::eDirection direction = Math::DIRECTION_DEFAULT) {
@@ -1338,7 +1338,7 @@ static void moveWindowOutOfGroupHelper(PHLWINDOW pWindow, Math::eDirection direc
         group->current()->warpCursor();
     }
 
-    IPC::Socket2::sock()->postEvent({.event = "moveoutofgroup", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "moveoutofgroup", .data = std::format("{:x}", rc<uintptr_t>(pWindow.get()))});
 }
 
 ActionResult Actions::moveIntoGroup(Math::eDirection direction, std::optional<PHLWINDOW> w) {
@@ -1664,7 +1664,7 @@ ActionResult Actions::mouse(const std::string& action) {
 ActionResult Actions::setSubmap(const std::string& submap) {
     if (submap == "reset" || submap.empty()) {
         Config::Actions::state()->m_currentSubmap = "";
-        IPC::Socket2::sock()->postEvent({.event = "submap", .data = ""});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "submap", .data = ""});
         Event::bus()->m_events.keybinds.submap.emit(std::string(""));
         return {};
     }
@@ -1672,7 +1672,7 @@ ActionResult Actions::setSubmap(const std::string& submap) {
     for (const auto& k : g_pKeybindManager->m_keybinds) {
         if (k->submap.name == submap) {
             Config::Actions::state()->m_currentSubmap = submap;
-            IPC::Socket2::sock()->postEvent({.event = "submap", .data = submap});
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "submap", .data = submap});
             Event::bus()->m_events.keybinds.submap.emit(submap);
             return {};
         }

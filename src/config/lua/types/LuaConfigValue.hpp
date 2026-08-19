@@ -30,7 +30,6 @@ namespace Config::Lua {
 
       private:
         Supplementary::PropRefreshBits m_refreshBits = 0;
-        const char*                    m_deprecated  = nullptr;
 
       public:
         virtual ~ILuaConfigValue() = default;
@@ -50,8 +49,5 @@ namespace Config::Lua {
         virtual bool                           setByUser();
         virtual void                           setRefreshBits(Supplementary::PropRefreshBits bits);
         virtual Supplementary::PropRefreshBits refreshBits() const;
-
-        virtual std::optional<const char*>     deprecationNotice() const;
-        virtual void                           setDeprecated(const char*);
     };
 };

@@ -1,26 +1,28 @@
 #include "GestureManager.hpp"
 #include "HyprLogger.hpp"
-#include "config/lua/ConfigManager.hpp"
-#include "config/shared/actions/ConfigActions.hpp"
-#include "config/shared/complex/ComplexDataTypes.hpp"
-#include "config/supplementary/propRefresher/PropRefresher.hpp"
+#include "gestures/Gestures.hpp"
 
 #define private public
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
-#include <hyprland/src/config/legacy/ConfigManager.hpp>
+#include <hyprland/src/config/lua/ConfigManager.hpp>
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
+#include <hyprland/src/config/supplementary/propRefresher/PropRefresher.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/output/Monitor.hpp>
-#include <hyprland/src/pointer/PointerController.hpp>
-#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginSystem.hpp>
+#include <hyprland/src/pointer/PointerController.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #undef private
+
+#include <hyprutils/string/Numeric.hpp>
 
 #include <algorithm>
 #include <ranges>
@@ -69,33 +71,24 @@ static int handleLongPressTimer(void* data) {
     return 0;
 }
 
-static std::string commaSeparatedCssGaps(const Config::CCssGapData& data) {
-    return std::to_string(data.m_top) + "," + std::to_string(data.m_right) + "," + std::to_string(data.m_bottom) + "," +
-           std::to_string(data.m_left);
-}
-
 static void updateGapsIn(const Config::CCssGapData& newGapsIn) {
     static auto PGAPSINDATA = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
 
-    if (Config::mgr()->type() == Config::CONFIG_LEGACY) {
-        Config::Legacy::mgr()->parseKeyword("general:gaps_in", commaSeparatedCssGaps(newGapsIn));
-    } else {
-        auto luaMgr = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
+    auto luaMgr = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
 
-        const auto it = luaMgr->m_configValues.find("general.gaps_in");
-        if (it == luaMgr->m_configValues.end()) {
-            Log::logger->log(Log::ERR, "[hyprgrass] lua config 'general.gaps_in' not found");
-            return;
-        }
-
-        auto* gapsInPtr = dynamic_cast<Config::CCssGapData*>(PGAPSINDATA.ptr());
-        // idk why `*gapsInPtr = newGapsIn` doesn't work
-        gapsInPtr->m_bottom = newGapsIn.m_bottom;
-        gapsInPtr->m_top    = newGapsIn.m_top;
-        gapsInPtr->m_left   = newGapsIn.m_left;
-        gapsInPtr->m_right  = newGapsIn.m_right;
-        Config::Supplementary::refresher()->scheduleRefresh(it->second->refreshBits());
+    const auto it = luaMgr->m_configValues.find("general.gaps_in");
+    if (it == luaMgr->m_configValues.end()) {
+        Log::logger->log(Log::ERR, "[hyprgrass] lua config 'general.gaps_in' not found");
+        return;
     }
+
+    auto* gapsInPtr = dynamic_cast<Config::CCssGapData*>(PGAPSINDATA.ptr());
+    // idk why `*gapsInPtr = newGapsIn` doesn't work
+    gapsInPtr->m_bottom = newGapsIn.m_bottom;
+    gapsInPtr->m_top    = newGapsIn.m_top;
+    gapsInPtr->m_left   = newGapsIn.m_left;
+    gapsInPtr->m_right  = newGapsIn.m_right;
+    Config::Supplementary::refresher()->scheduleRefresh(it->second->refreshBits());
 }
 
 GestureManager::GestureManager() : IGestureManager(std::make_unique<HyprLogger>()) {
@@ -120,10 +113,10 @@ GestureManager::~GestureManager() {
     wl_event_source_remove(this->long_press_timer);
 }
 
-bool GestureManager::findCompletedGesture(const CompletedGestureEvent& gev) const {
+FindGestureResult GestureManager::findCompletedGesture(const CompletedGestureEvent& gev) const {
     return this->findGestureBind(gev.to_string(), GestureEventType::COMPLETED);
 }
-bool GestureManager::handleCompletedGesture(const CompletedGestureEvent& gev) {
+FindGestureResult GestureManager::handleCompletedGesture(const CompletedGestureEvent& gev) {
     return this->handleGestureBind(gev.to_string(), GestureEventType::COMPLETED);
 }
 
@@ -177,7 +170,8 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
 
         case GestureType::LONG_PRESS:
             if (g_pSessionLockManager->isSessionLocked()) {
-                return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN);
+                return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) !=
+                       FindGestureResult::NONE;
             }
 
             if (RESIZE_LONG_PRESS->value() && gev.finger_count == 1) {
@@ -191,15 +185,15 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
                 if (w && !Fullscreen::controller()->isFullscreen(w)) {
                     const Vector2D realPos  = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
                     const Vector2D realSize = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                    const CBox real = {realPos.x, realPos.y, realSize.x, realSize.y};
-                    const CBox grab = {
+                    const CBox real         = {realPos.x, realPos.y, realSize.x, realSize.y};
+                    const CBox grab         = {
                         real.x - BORDER_GRAB_AREA, real.y - BORDER_GRAB_AREA, real.width + 2 * BORDER_GRAB_AREA,
                         real.height + 2 * BORDER_GRAB_AREA
                     };
 
                     bool notInRealWindow = !real.containsPoint(touchPos) || w->isInCurvedCorner(touchPos.x, touchPos.y);
-                    bool onTiledGap      = !w->m_isFloating && !Fullscreen::controller()->isFullscreen(w) && notInRealWindow;
-                    bool inGrabArea      = notInRealWindow && grab.containsPoint(touchPos);
+                    bool onTiledGap = !w->m_isFloating && !Fullscreen::controller()->isFullscreen(w) && notInRealWindow;
+                    bool inGrabArea = notInRealWindow && grab.containsPoint(touchPos);
 
                     if ((onTiledGap || inGrabArea) && !w->hasPopupAt(touchPos)) {
                         IPointer::SButtonEvent e = {
@@ -229,13 +223,13 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
             if (this->trackpadGestureBegin(gev))
                 return true;
 
-            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN);
+            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) != FindGestureResult::NONE;
 
         case GestureType::PINCH:
             if (this->trackpadGestureBegin(gev))
                 return true;
 
-            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN);
+            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) != FindGestureResult::NONE;
             break;
         case GestureType::TAP:
             // tap does not trigger drag
@@ -245,8 +239,10 @@ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
     return false;
 }
 
-bool GestureManager::findGestureBind(std::string bind, GestureEventType type) const {
+FindGestureResult GestureManager::findGestureBind(std::string bind, GestureEventType type) const {
     Log::logger->log(Log::DEBUG, "[hyprgrass] Looking for binds matching: {}", bind);
+
+    auto result = FindGestureResult::NONE;
 
     auto allBinds   = std::ranges::views::join(std::array{g_pKeybindManager->m_keybinds, this->internalBinds});
     const auto MODS = g_pInputManager->getModsFromAllKBs();
@@ -264,15 +260,20 @@ bool GestureManager::findGestureBind(std::string bind, GestureEventType type) co
         if (k->modmask != MODS)
             continue;
 
-        return true;
+        if (k->nonConsuming) {
+            result = FindGestureResult::NON_CONSUMING;
+            continue;
+        }
+
+        return FindGestureResult::FOUND;
     }
-    return false;
+    return result;
 }
 
 // bind is the name of the gesture event.
 // pressed only matters for mouse binds: only start of drag gestures should set it to true
-bool GestureManager::handleGestureBind(std::string bind, GestureEventType type) {
-    bool found = false;
+FindGestureResult GestureManager::handleGestureBind(std::string bind, GestureEventType type) {
+    auto found = FindGestureResult::NONE;
     Log::logger->log(Log::DEBUG, "[hyprgrass] Looking for binds matching: {}", bind);
 
     auto allBinds   = std::ranges::views::join(std::array{g_pKeybindManager->m_keybinds, this->internalBinds});
@@ -291,49 +292,43 @@ bool GestureManager::handleGestureBind(std::string bind, GestureEventType type) 
         if (k->modmask != MODS)
             continue;
 
-        // only legacy config uses "mouse" dispatcher
-        bool useMouseDispatcher = k->mouse && Config::mgr()->type() == Config::CONFIG_LEGACY;
-        const auto DISPATCHER   = g_pKeybindManager->m_dispatchers.find(useMouseDispatcher ? "mouse" : k->handler);
-
         // Should never happen, as we check in the ConfigManager, but oh well
-        if (DISPATCHER == g_pKeybindManager->m_dispatchers.end()) {
-            Log::logger->log(Log::ERR, "Invalid handler in a keybind! (handler {} does not exist)", k->handler);
+        const auto ref = Hyprutils::String::strToNumber<int>(k->arg);
+        if (k->handler != "__lua" || !ref) {
+            Log::logger->log(Log::ERR, "Invalid handler in a keybind! (handler {} is not a lua function)", k->handler);
             continue;
         }
+
+        auto luaMgr = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
 
         switch (type) {
             case GestureEventType::COMPLETED:
                 // mouse dispatchers only trigger on drag begin/end
                 if (!k->mouse) {
                     Log::logger->log(Log::DEBUG, "[hyprgrass] calling dispatcher ({})", bind);
-                    DISPATCHER->second(k->arg);
-                    found = found || !k->nonConsuming;
+                    luaMgr->callLuaFn(*ref);
+                    found =
+                        std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
                 }
                 break;
 
-            default:
+            default: {
                 if (!k->mouse) {
                     // only mouse actions are considered on drag begin/end
                     continue;
                 }
 
-                if (useMouseDispatcher) {
-                    Log::logger->log(Log::DEBUG, "[hyprgrass] calling mouse dispatcher ({})", bind);
-                    char pressed = type == GestureEventType::DRAG_BEGIN ? '1' : '0';
-                    DISPATCHER->second(pressed + k->arg);
-                    found = found || !k->nonConsuming;
-                } else {
-                    bool pressed          = type == GestureEventType::DRAG_BEGIN;
-                    this->mouseBindActive = pressed;
-                    // yes this is how the lua dispatcher detects key press state
-                    Config::Actions::state()->m_passPressed = static_cast<int>(pressed);
+                bool pressed          = type == GestureEventType::DRAG_BEGIN;
+                this->mouseBindActive = pressed;
+                // yes this is how the lua dispatcher detects key press state
+                Config::Actions::state()->m_passPressed = static_cast<int>(pressed);
 
-                    DISPATCHER->second(k->arg);
+                luaMgr->callLuaFn(*ref);
 
-                    Config::Actions::state()->m_passPressed = -1;
+                Config::Actions::state()->m_passPressed = -1;
 
-                    found = found || !k->nonConsuming;
-                }
+                found = std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
+            }
         }
     }
 
@@ -472,7 +467,9 @@ bool GestureManager::trackpadGestureBegin(const DragGestureEvent& gev) {
             }
         }
     }
-    uint32_t fingers = gev.type == GestureType::EDGE_SWIPE ? gev.edge_origin : gev.finger_count;
+    uint32_t fingers = gev.type == GestureType::EDGE_SWIPE
+                           ? (gev.edge_origin << MOD_MASK_SHIFT) | (gev.finger_count & FINGERS_MASK)
+                           : gev.finger_count;
 
     CTrackpadGestures* handler = g_pShimTrackpadGestures->get(gev.type);
     if (gev.type == GestureType::PINCH) {
@@ -520,7 +517,9 @@ void GestureManager::trackpadGestureUpdate(uint32_t time) {
     const Vector2D delta    = pixelToTrackpadDistance(deltaPx);
 
     DragGestureEvent activeDrag = this->getActiveDragGesture().value();
-    uint32_t fingers = activeDrag.type == GestureType::EDGE_SWIPE ? activeDrag.edge_origin : activeDrag.finger_count;
+    uint32_t fingers            = activeDrag.type == GestureType::EDGE_SWIPE
+                                      ? (activeDrag.edge_origin << MOD_MASK_SHIFT) | (activeDrag.finger_count & FINGERS_MASK)
+                                      : activeDrag.finger_count;
 
     this->emulatedSwipePoint = currentPoint;
 
@@ -592,8 +591,9 @@ void GestureManager::sendCancelEventsToWindows() {
 bool GestureManager::onTouchDown(ITouch::SDownEvent ev) {
     static auto const SEND_CANCEL = g_config->sendCancel;
 
-    auto monitor = State::monitorState()->query().name(!ev.device->m_boundOutput.empty() ? ev.device->m_boundOutput : "").run();
-    monitor      = monitor ? monitor : Desktop::focusState()->monitor();
+    auto monitor =
+        State::monitorState()->query().name(!ev.device->m_boundOutput.empty() ? ev.device->m_boundOutput : "").run();
+    monitor = monitor ? monitor : Desktop::focusState()->monitor();
 
     if (!monitor) {
         Log::logger->log(Log::ERR, "[hyprgrass] onTouchDown: could not find a monitor???");
@@ -714,7 +714,7 @@ bool GestureManager::onTouchMove(ITouch::SMotionEvent ev) {
         .pos    = pos,
     };
 
-    return IGestureManager::onTouchMove(gesture_event);
+    return IGestureManager::onTouchMove(gesture_event) != FindGestureResult::NONE;
 }
 
 SMonitorArea GestureManager::getMonitorArea() const {

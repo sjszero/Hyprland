@@ -1,17 +1,16 @@
 #include "gestures/CompletedGesture.hpp"
-#include "gestures/DragGesture.hpp"
 #include "gestures/Shared.hpp"
-#include "src/managers/input/trackpad/GestureTypes.hpp"
 #include <any>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include <hyprland/src/config/ConfigManager.hpp>
-#include <hyprutils/string/ConstVarList.hpp>
 #include <hyprutils/string/VarList.hpp>
 
 #define private public
+#include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 #undef private
 
@@ -20,7 +19,7 @@ constexpr size_t FINGERS_MASK   = 0xFF; // lowest 8 bits
 
 GestureDirection toHyprgrassDirection(eTrackpadGestureDirection dir);
 
-struct GestureConfig {
+struct GesturePattern {
     GestureType type;
     eTrackpadGestureDirection direction;
     size_t fingersOrOrigin;
@@ -32,7 +31,11 @@ struct GestureConfig {
     }
 
     inline GestureDirection edgeOrigin() const {
-        return static_cast<GestureDirection>(this->fingersOrOrigin);
+        return static_cast<GestureDirection>(this->fingersOrOrigin >> MOD_MASK_SHIFT);
+    }
+
+    inline uint32_t edgeFingerCount() const {
+        return static_cast<uint32_t>(this->fingersOrOrigin & FINGERS_MASK);
     }
 
     static eTrackpadGestureDirection originFromFingers(size_t);
@@ -40,14 +43,14 @@ struct GestureConfig {
         CompletedGestureEvent gev{
             .type         = this->type,
             .direction    = toHyprgrassDirection(this->direction),
-            .finger_count = static_cast<uint32_t>(this->type == GestureType::EDGE_SWIPE ? 0 : this->fingers()),
+            .finger_count = static_cast<uint32_t>(this->type == GestureType::EDGE_SWIPE ? this->edgeFingerCount() : this->fingers()),
             .edge_origin  = this->type == GestureType::EDGE_SWIPE ? this->edgeOrigin() : 0,
         };
         return gev.to_string();
     }
 };
 
-std::expected<GestureConfig, std::string> parseGesturePattern(Hyprutils::String::CConstVarList& vars);
+std::expected<GesturePattern, std::string> parseGesturePattern(const std::string_view& s);
 
 struct ShimTrackpadGestures {
   public:

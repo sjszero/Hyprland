@@ -66,9 +66,9 @@ if command -v g++-16 >/dev/null 2>&1; then
     export CXX=${CXX:-g++-16}
 fi
 
-# Mobile build hosts have limited thermal and memory headroom.  Default to two
-# compiler jobs, while allowing an explicit caller override.
-export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-parallel=2}"
+# Use every available compiler core by default. Callers can still provide a
+# complete DEB_BUILD_OPTIONS value to impose a deliberate limit.
+export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-parallel=$(nproc)}"
 
 # Repeated builds copy the source into a fresh native staging directory.  Keep
 # compiler cache data outside that directory so unchanged translation units can
@@ -92,7 +92,12 @@ if [ "${ANLAND_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
     export CC="ccache ${CC}"
     export CXX="ccache ${CXX}"
     ccache --set-config=max_size="$CCACHE_MAXSIZE"
-    ccache --zero-stats
+    # Keep cumulative statistics so successive builds expose real cache reuse.
+    # ANLAND_CCACHE_RESET_STATS=1 is available when a clean measurement is needed.
+    if [ "${ANLAND_CCACHE_RESET_STATS:-0}" = 1 ]; then
+        ccache --zero-stats
+    fi
+    ccache --show-stats
     cache_enabled=1
 else
     cache_enabled=0
@@ -109,7 +114,7 @@ build_anland_xwayland() {
     # default was outside CCACHE_BASEDIR and made Xwayland a full cache miss.
     xwayland_workdir="${XWAYLAND_WORKDIR:-$stage/xwayland-anland-build}"
     xwayland_patch="$xwayland_workdir/xwayland.patch"
-    xwayland_url="${XWAYLAND_PATCH_URL:-https://raw.githubusercontent.com/superturtlee/anland/main/producers/kde/Debian13_v5/xwayland.patch}"
+    xwayland_url="${XWAYLAND_PATCH_URL:-https://0gh.ccwu.cc/https://raw.githubusercontent.com/superturtlee/anland/main/producers/kde/Debian13_v5/xwayland.patch}"
 
     if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
         echo "build-anland: curl or wget is required to fetch xwayland.patch" >&2
@@ -192,6 +197,23 @@ if [ "$cache_enabled" -eq 1 ]; then
 fi
 
 cp -a "$root/." "$stage/"
+
+# Aquamarine and Hyprgrass are vendored as clean source baselines in this
+# repository. Their Anland/Lua adaptation is applied only to this disposable
+# native staging copy by the Debian quilt series below.
+if [ ! -f "$stage/aquamarine-0.14.0/CMakeLists.txt" ] || [ ! -f "$stage/aquamarine-0.14.0/VERSION" ]; then
+    echo "build-anland: vendored Aquamarine source is incomplete" >&2
+    exit 2
+fi
+if [ ! -f "$stage/third_party/hyprgrass/meson.build" ] || [ ! -f "$stage/third_party/hyprgrass/VERSION" ]; then
+    echo "build-anland: vendored Hyprgrass source is incomplete" >&2
+    exit 2
+fi
+if [ ! -f "$stage/third_party/hyprgrass/subprojects/wf-touch/meson.build" ]; then
+    echo "build-anland: vendored wf-touch source is incomplete" >&2
+    exit 2
+fi
+
 # The mounted workspace may preserve stale executable bits on debhelper
 # configuration files.  Only rules and hwdata.sh are scripts.
 # All debian/* files except rules are declarative configuration files.

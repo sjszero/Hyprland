@@ -4,7 +4,6 @@
 #include <Compositor.hpp>
 
 #include <config/lua/types/LuaConfigInt.hpp>
-#include <config/values/types/IntValue.hpp>
 
 #include <gtest/gtest.h>
 
@@ -303,36 +302,6 @@ TEST(ConfigLuaBindingsInternal, pluginBindingIsTableWithLoadFunction) {
     lua_pop(L, 2);
 }
 
-TEST(ConfigLuaBindingsInternal, deprecationNoticesOnlyIncludeUsedDeprecatedValues) {
-    CScopedCompositor compositor;
-    CLuaState         state;
-    const auto        lua = state.get();
-
-    CConfigManager    mgr;
-    CConfigManagerPluginLuaTestAccessor::initializeLuaState(mgr, lua);
-
-    lua_newtable(lua);
-    Internal::registerConfigRuleBindings(lua, &mgr);
-    lua_setglobal(lua, "hl");
-
-    const auto HANDLE = reinterpret_cast<void*>(0x1BADB002);
-    ASSERT_TRUE(mgr.registerPluginValue(HANDLE, makeShared<Config::Values::CIntValue>("test:ordinary", "", 0)).has_value());
-    ASSERT_TRUE(
-        mgr.registerPluginValue(HANDLE, makeShared<Config::Values::CIntValue>("test:deprecated", "", 0, Config::Values::SIntValueOptions{.deprecationNotice = "use replacement"}))
-            .has_value());
-
-    EXPECT_TRUE(mgr.deprecationNotices().empty());
-
-    ASSERT_EQ(luaL_dostring(lua, "hl.config({ test = { ordinary = 1 } })"), LUA_OK) << lua_tostring(lua, -1);
-    EXPECT_TRUE(mgr.deprecationNotices().empty());
-
-    ASSERT_EQ(luaL_dostring(lua, "hl.config({ test = { deprecated = 1 } })"), LUA_OK) << lua_tostring(lua, -1);
-
-    const auto notices = mgr.deprecationNotices();
-    ASSERT_EQ(notices.size(), 1);
-    EXPECT_EQ(notices.front(), "test.deprecated: use replacement");
-}
-
 TEST(ConfigLuaBindingsInternal, pluginLuaFnIsUnloadedWithoutDanglingCall) {
     CLuaState  S;
     const auto L = S.get();
@@ -391,7 +360,7 @@ TEST(ConfigLuaRequire, absolutePathLoadsAndTracksFile) {
     CConfigManagerPluginLuaTestAccessor::initializeOwnedLuaState(mgr, mainConfig);
     const auto L = CConfigManagerPluginLuaTestAccessor::luaState(mgr);
 
-    const auto CODE = std::format("mod = require({})", luaString(module.string()));
+    const auto CODE = "mod = require(" + luaString(module.string()) + ")";
     ASSERT_EQ(luaL_dostring(L, CODE.c_str()), LUA_OK) << lua_tostring(L, -1);
 
     lua_getglobal(L, "mod");
@@ -517,6 +486,6 @@ TEST(ConfigLuaRequire, packagePathPreservesLuaDefaultsAfterConfigDirectory) {
     CConfigManager mgr;
     CConfigManagerPluginLuaTestAccessor::initializeOwnedLuaState(mgr, mainConfig);
 
-    const auto configPath = std::format("{};{}", (tmp.path() / "?.lua").string(), (tmp.path() / "?/init.lua").string());
-    EXPECT_EQ(packagePath(CConfigManagerPluginLuaTestAccessor::luaState(mgr)), std::format("{};{}", configPath, defaultPath));
+    const auto configPath = (tmp.path() / "?.lua").string() + ";" + (tmp.path() / "?/init.lua").string();
+    EXPECT_EQ(packagePath(CConfigManagerPluginLuaTestAccessor::luaState(mgr)), configPath + ";" + defaultPath);
 }

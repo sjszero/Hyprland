@@ -1,0 +1,66 @@
+Index: Hyprland-local-test/src/output/Monitor.cpp
+===================================================================
+--- Hyprland-local-test.orig/src/output/Monitor.cpp
++++ Hyprland-local-test/src/output/Monitor.cpp
+@@ -230,13 +230,14 @@ void CMonitor::onConnect(bool noRule) {
+ 
+         const auto SIZE = event.size;
+ 
+-        m_forceSize = SIZE;
+-
++        // An Anland Surface replacement owns this one mode transaction only.
++        // Do not retain the old orientation for later output-management requests.
+         auto rule = m_activeMonitorRule;
+ 
+         if (SIZE == rule.m_resolution)
+             return;
+ 
++        m_forceSize       = SIZE;
+         rule.m_resolution = SIZE;
+ 
+         applyMonitorRule(std::move(rule));
+@@ -722,8 +723,11 @@ bool CMonitor::applyMonitorRule(Config::
+ 
+     Log::logger->log(Log::DEBUG, "Applying monitor rule for {}", m_name);
+ 
+-    if (m_forceSize.has_value())
+-        m_activeMonitorRule.m_resolution = m_forceSize.value();
++    if (m_forceSize.has_value()) {
++        // Apply a backend geometry hint to this local transaction, then clear it.
++        pMonitorRule.m_resolution = m_forceSize.value();
++        m_forceSize.reset();
++    }
+ 
+     const auto RULE = &pMonitorRule;
+ 
+@@ -1067,10 +1071,29 @@ bool CMonitor::applyMonitorRule(Config::
+             g_pHyprRenderer->glBackend()->destroyMonitorResources(m_self);
+     }
+ 
++    const bool geometryChanged = OLD_PIXEL_SIZE != m_pixelSize || OLDTRANSFORMEDSIZE != m_transformedSize;
++
+     applyMonitorRuleSoft(std::move(pMonitorRule));
+ 
+-    if (OLD_PIXEL_SIZE != m_pixelSize)
++    // A forced size belongs only to the Anland Surface replacement transaction.
++    m_forceSize.reset();
++
++    if (geometryChanged) {
+         m_background.reset();
++        m_splash.reset();
++
++        // Schedule the normal layer arrangement after the output commit. This
++        // avoids protocol re-entry from the backend state callback.
++        g_pEventLoopManager->doLater([self = m_self] {
++            const auto monitor = self.lock();
++            if (!monitor || !monitor->m_output)
++                return;
++
++            g_pHyprRenderer->arrangeLayersForMonitor(monitor->m_id);
++            g_layoutManager->recalculateMonitor(monitor);
++            g_pHyprRenderer->damageMonitor(monitor);
++        });
++    }
+ 
+     updateVCGTRamps();
+ 

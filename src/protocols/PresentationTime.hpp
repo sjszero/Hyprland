@@ -20,6 +20,8 @@ class CQueuedPresentationData {
     void presented();
     void discarded();
 
+    bool m_done = false;
+
   private:
     bool                                   m_wasPresented = false;
     bool                                   m_zeroCopy     = false;

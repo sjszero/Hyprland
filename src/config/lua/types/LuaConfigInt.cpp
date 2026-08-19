@@ -36,7 +36,7 @@ SParseError CLuaConfigInt::parse(lua_State* s) {
             for (const auto& [k, _] : *m_map) {
                 if (!keys.empty())
                     keys += ", ";
-                keys += std::format("\"{}\"", k);
+                keys += "\"" + k + "\"";
             }
             return {.errorCode = PARSE_ERROR_BAD_VALUE, .message = std::format("unknown string value \"{}\", acceptable values are: {}", str, keys)};
         }

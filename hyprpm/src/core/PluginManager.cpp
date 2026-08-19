@@ -51,7 +51,7 @@ static std::string getTempRoot() {
         exit(1);
     }
 
-    const auto STR = std::format("{}/hyprpm/", ENV);
+    const auto STR = ENV + std::string{"/hyprpm/"};
 
     return STR;
 }
@@ -203,7 +203,7 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
 
     const std::string USERNAME = getpwuid(getuid())->pw_name;
 
-    m_szWorkingPluginDirectory = std::format("{}{}", getTempRoot(), USERNAME);
+    m_szWorkingPluginDirectory = getTempRoot() + USERNAME;
 
     if (!createSafeDirectory(m_szWorkingPluginDirectory)) {
         std::println(stderr, "\n{}", failureString("Could not prepare working dir for repo"));
@@ -214,18 +214,18 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
 
     std::string ret = execAndGet(std::format("cd {} && git clone --recursive '{}' {}", getTempRoot(), url, USERNAME));
 
-    if (!std::filesystem::exists(std::format("{}/.git", m_szWorkingPluginDirectory))) {
+    if (!std::filesystem::exists(m_szWorkingPluginDirectory + "/.git")) {
         std::println(stderr, "\n{}", failureString("Could not clone the plugin repository. shell returned:\n{}", ret));
         return false;
     }
 
     if (!rev.empty()) {
-        std::string ret = execAndGet(std::format("git -C {} reset --hard --recurse-submodules {}", m_szWorkingPluginDirectory, rev));
+        std::string ret = execAndGet("git -C " + m_szWorkingPluginDirectory + " reset --hard --recurse-submodules " + rev);
         if (ret.compare(0, 6, "fatal:") == 0) {
             std::println(stderr, "\n{}", failureString("Could not check out revision {}. shell returned:\n{}", rev, ret));
             return false;
         }
-        ret = execAndGet(std::format("git -C {} submodule update --init", m_szWorkingPluginDirectory));
+        ret = execAndGet("git -C " + m_szWorkingPluginDirectory + " submodule update --init");
         if (m_bVerbose)
             std::println("{}", verboseString("git submodule update --init returned: {}", ret));
     }
@@ -237,12 +237,12 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
 
     std::unique_ptr<CManifest> pManifest;
 
-    if (std::filesystem::exists(std::format("{}/hyprpm.toml", m_szWorkingPluginDirectory))) {
+    if (std::filesystem::exists(m_szWorkingPluginDirectory + "/hyprpm.toml")) {
         progress.printMessageAbove(successString("found hyprpm manifest"));
-        pManifest = std::make_unique<CManifest>(MANIFEST_HYPRPM, std::format("{}/hyprpm.toml", m_szWorkingPluginDirectory));
-    } else if (std::filesystem::exists(std::format("{}/hyprload.toml", m_szWorkingPluginDirectory))) {
+        pManifest = std::make_unique<CManifest>(MANIFEST_HYPRPM, m_szWorkingPluginDirectory + "/hyprpm.toml");
+    } else if (std::filesystem::exists(m_szWorkingPluginDirectory + "/hyprload.toml")) {
         progress.printMessageAbove(successString("found hyprload manifest"));
-        pManifest = std::make_unique<CManifest>(MANIFEST_HYPRLOAD, std::format("{}/hyprload.toml", m_szWorkingPluginDirectory));
+        pManifest = std::make_unique<CManifest>(MANIFEST_HYPRLOAD, m_szWorkingPluginDirectory + "/hyprload.toml");
     }
 
     if (!pManifest) {
@@ -256,17 +256,17 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
     }
 
     progress.m_iSteps = 2;
-    progress.printMessageAbove(successString("parsed manifest, found {} plugins:", pManifest->m_plugins.size()));
+    progress.printMessageAbove(successString("parsed manifest, found " + std::to_string(pManifest->m_plugins.size()) + " plugins:"));
     for (auto const& pl : pManifest->m_plugins) {
-        std::string message = std::format("→ {} by ", pl.name);
+        std::string message = "→ " + pl.name + " by ";
         for (auto const& a : pl.authors) {
-            message += std::format("{}, ", a);
+            message += a + ", ";
         }
         if (pl.authors.size() > 0) {
             message.pop_back();
             message.pop_back();
         }
-        message += std::format(" version {}", pl.version);
+        message += " version " + pl.version;
         progress.printMessageAbove(message);
     }
 
@@ -286,9 +286,9 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
 
             progress.printMessageAbove(successString("commit pin {} matched hl, resetting", plugin));
 
-            execAndGet(std::format("cd {} && git reset --hard --recurse-submodules '{}'", m_szWorkingPluginDirectory, plugin));
+            execAndGet("cd " + m_szWorkingPluginDirectory + " && git reset --hard --recurse-submodules '" + plugin + "'");
 
-            ret = execAndGet(std::format("git -C {} submodule update --init", m_szWorkingPluginDirectory));
+            ret = execAndGet("git -C " + m_szWorkingPluginDirectory + " submodule update --init");
             if (m_bVerbose)
                 std::println("{}", verboseString("git submodule update --init returned: {}", ret));
 
@@ -333,13 +333,13 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
                 break;
             }
 
-            out += std::format(" -> {}\n{}\n", *CMD_RAW, execAndGet(*CMD_RAW));
+            out += " -> " + *CMD_RAW + "\n" + execAndGet(*CMD_RAW) + "\n";
         }
 
         if (m_bVerbose)
             std::println("{}", verboseString("shell returned: {}", out));
 
-        if (!std::filesystem::exists(std::format("{}/{}", m_szWorkingPluginDirectory, p.output))) {
+        if (!std::filesystem::exists(m_szWorkingPluginDirectory + "/" + p.output)) {
             progress.printMessageAbove(failureString("Plugin {} failed to build.\n"
                                                      "  This likely means that the plugin is either outdated, not yet available for your version, or broken.\n"
                                                      "  If you are on -git, update first\n"
@@ -360,7 +360,7 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
 
     // add repo toml to DataState
     SPluginRepository repo;
-    std::string       repohash = execAndGet(std::format("cd {} && git rev-parse HEAD", m_szWorkingPluginDirectory));
+    std::string       repohash = execAndGet("cd " + m_szWorkingPluginDirectory + " && git rev-parse HEAD");
     if (repohash.length() > 0)
         repohash.pop_back();
     auto lastSlash       = url.find_last_of('/');
@@ -371,7 +371,7 @@ bool CPluginManager::addNewPluginRepo(const std::string& url, const std::string&
     repo.rev             = rev;
     repo.hash            = repohash;
     for (auto const& p : pManifest->m_plugins) {
-        repo.plugins.push_back(SPlugin{p.name, std::format("{}/{}", m_szWorkingPluginDirectory, p.output), false, p.failed});
+        repo.plugins.push_back(SPlugin{p.name, m_szWorkingPluginDirectory + "/" + p.output, false, p.failed});
     }
     DataState::addNewPluginRepo(repo);
 
@@ -414,8 +414,10 @@ bool CPluginManager::removePluginRepo(const SPluginRepoIdentifier& identifier) {
 eHeadersErrors CPluginManager::headersValid() {
     const auto HLVER = getHyprlandVersion(false);
 
-    if (!std::filesystem::exists(std::format("{}/share/pkgconfig/hyprland.pc", DataState::getHeadersPath())))
+#if 0  // disable hyprland.pc check, let pkgconf handle it
+    if (!std::filesystem::exists(DataState::getHeadersPath() + "/share/pkgconfig/hyprland.pc"))
         return HEADERS_MISSING;
+#endif
 
     // find headers commit
     const std::string& cmd     = std::format("PKG_CONFIG_PATH=\"{}\" pkgconf --cflags --keep-system-cflags hyprland", getPkgConfigPath());
@@ -439,7 +441,7 @@ eHeadersErrors CPluginManager::headersValid() {
         if (PATH.ends_with("protocols"))
             continue;
 
-        verHeader = std::format("{}/hyprland/src/version.h", trim(PATH.substr(2)));
+        verHeader = trim(PATH.substr(2)) + "/hyprland/src/version.h";
         break;
     }
 
@@ -502,6 +504,7 @@ bool CPluginManager::updateHeaders(bool force) {
         std::filesystem::permissions(getTempRoot(), std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
     }
 
+#if 0  // disable hyprland cloning for system package
     const auto CURRENTHEADERS = headersValid();
 
     if (!force && (CURRENTHEADERS == HEADERS_OK || CURRENTHEADERS == HEADERS_ABI_MISMATCH)) {
@@ -516,7 +519,7 @@ bool CPluginManager::updateHeaders(bool force) {
     progress.print();
 
     const std::string USERNAME   = getpwuid(getuid())->pw_name;
-    const auto        WORKINGDIR = std::format("{}hyprland-{}", getTempRoot(), USERNAME);
+    const auto        WORKINGDIR = getTempRoot() + "hyprland-" + USERNAME;
 
     if (!createSafeDirectory(WORKINGDIR)) {
         std::println("\n{}", failureString("Could not prepare working dir for hl"));
@@ -531,21 +534,20 @@ bool CPluginManager::updateHeaders(bool force) {
 
     // let us give a bit of leg-room for shallowing
     // due to timezones, etc.
-    const std::string SHALLOW_DATE =
-        trim(HLVER.date).empty() ? "" : execAndGet(std::format("LC_TIME=\"en_US.UTF-8\" date --date='{} - 1 weeks' '+%a %b %d %H:%M:%S %Y'", HLVER.date));
+    const std::string SHALLOW_DATE = trim(HLVER.date).empty() ? "" : execAndGet("LC_TIME=\"en_US.UTF-8\" date --date='" + HLVER.date + " - 1 weeks' '+%a %b %d %H:%M:%S %Y'");
 
     if (m_bVerbose && bShallow)
         progress.printMessageAbove(verboseString("will shallow since: {}", SHALLOW_DATE));
 
-    std::string ret = execAndGet(std::format("cd {} && git clone --recursive '{}' hyprland-{}{}", getTempRoot(), HL_URL, USERNAME,
-                                             (bShallow ? std::format(" --shallow-since='{}'", SHALLOW_DATE) : std::string{})));
+    std::string ret =
+        execAndGet(std::format("cd {} && git clone --recursive '{}' hyprland-{}{}", getTempRoot(), HL_URL, USERNAME, (bShallow ? " --shallow-since='" + SHALLOW_DATE + "'" : "")));
 
     if (!std::filesystem::exists(WORKINGDIR)) {
         progress.printMessageAbove(failureString("Clone failed. Retrying without shallow."));
         ret = execAndGet(std::format("cd {} && git clone --recursive '{}' hyprland-{}", getTempRoot(), HL_URL, USERNAME));
     }
 
-    if (!std::filesystem::exists(std::format("{}/.git", WORKINGDIR))) {
+    if (!std::filesystem::exists(WORKINGDIR + "/.git")) {
         std::println(stderr, "\n{}", failureString("Could not clone the Hyprland repository. shell returned:\n{}", ret));
         return false;
     }
@@ -558,7 +560,7 @@ bool CPluginManager::updateHeaders(bool force) {
     if (m_bVerbose)
         progress.printMessageAbove(verboseString("will run: cd {} && git checkout {} 2>&1", WORKINGDIR, HLVER.hash));
 
-    ret = execAndGet(std::format("cd {} && git checkout {} 2>&1", WORKINGDIR, HLVER.hash));
+    ret = execAndGet("cd " + WORKINGDIR + " && git checkout " + HLVER.hash + " 2>&1");
 
     if (ret.contains("fatal: unable to read tree")) {
         std::println(stderr, "\n{}",
@@ -570,7 +572,7 @@ bool CPluginManager::updateHeaders(bool force) {
     if (m_bVerbose)
         progress.printMessageAbove(verboseString("git returned (co): {}", ret));
 
-    ret = execAndGet(std::format("cd {} ; git rm subprojects/tracy ; git submodule update --init 2>&1 ; git reset --hard --recurse-submodules {}", WORKINGDIR, HLVER.hash));
+    ret = execAndGet("cd " + WORKINGDIR + " ; git rm subprojects/tracy ; git submodule update --init 2>&1 ; git reset --hard --recurse-submodules " + HLVER.hash);
 
     if (m_bVerbose)
         progress.printMessageAbove(verboseString("git returned (rs): {}", ret));
@@ -641,24 +643,29 @@ bool CPluginManager::updateHeaders(bool force) {
 
     // remove build files
     std::filesystem::remove_all(WORKINGDIR);
+#endif  // disable hyprland cloning for system package
 
     auto HEADERSVALID = headersValid();
 
     if (HEADERSVALID == HEADERS_OK || HEADERSVALID == HEADERS_ABI_MISMATCH) {
+#if 0  // disabled in favour of system package headers
         progress.printMessageAbove(successString("installed headers"));
         progress.m_iSteps           = 5;
         progress.m_szCurrentMessage = "Done!";
         progress.print();
+#endif  // disabled in favour of system package headers
 
         std::print("\n");
     } else {
+#if 0  // disabled in favour of system package headers
         progress.printMessageAbove(failureString("failed to install headers with error code {} ({})", sc<int>(HEADERSVALID), headerErrorShort(HEADERSVALID)));
         progress.printMessageAbove(infoString("if the problem persists, try running hyprpm purge-cache."));
         progress.m_iSteps           = 5;
         progress.m_szCurrentMessage = "Failed";
         progress.print();
+#endif  // disabled in favour of system package headers
 
-        std::print(stderr, "\n\n{}", headerError(HEADERSVALID));
+        std::print(stderr, "{}", headerError(HEADERSVALID));
 
         return false;
     }
@@ -692,7 +699,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
     progress.print();
 
     const std::string USERNAME = getpwuid(getuid())->pw_name;
-    m_szWorkingPluginDirectory = std::format("{}{}", getTempRoot(), USERNAME);
+    m_szWorkingPluginDirectory = getTempRoot() + USERNAME;
 
     std::vector<std::string> failedRepos;
 
@@ -710,7 +717,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
         bool update = forceUpdateAll;
 
         progress.m_iSteps++;
-        progress.m_szCurrentMessage = std::format("Updating {}", repo.name);
+        progress.m_szCurrentMessage = "Updating " + repo.name;
         progress.print();
 
         progress.printMessageAbove(infoString("checking for updates for {}", repo.name));
@@ -721,7 +728,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
 
         std::string ret = execAndGet(std::format("cd {} && git clone --recursive '{}' {}", getTempRoot(), repo.url, USERNAME));
 
-        if (!std::filesystem::exists(std::format("{}/.git", m_szWorkingPluginDirectory))) {
+        if (!std::filesystem::exists(m_szWorkingPluginDirectory + "/.git")) {
             std::println(stderr, "\n{}", failureString("could not clone repo: shell returned: {}", ret));
             markRepoFailed(repo, true);
             continue;
@@ -730,7 +737,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
         if (!repo.rev.empty()) {
             progress.printMessageAbove(infoString("Plugin has revision set, resetting: {}", repo.rev));
 
-            std::string ret = execAndGet(std::format("git -C {} reset --hard --recurse-submodules \'{}\'", m_szWorkingPluginDirectory, repo.rev));
+            std::string ret = execAndGet("git -C " + m_szWorkingPluginDirectory + " reset --hard --recurse-submodules \'" + repo.rev + "\'");
             if (ret.compare(0, 6, "fatal:") == 0) {
                 std::println(stderr, "\n{}", failureString("could not check out revision {}: shell returned:\n{}", repo.rev, ret));
 
@@ -741,7 +748,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
 
         if (!update) {
             // check if git has updates
-            std::string hash = execAndGet(std::format("cd {} && git rev-parse HEAD", m_szWorkingPluginDirectory));
+            std::string hash = execAndGet("cd " + m_szWorkingPluginDirectory + " && git rev-parse HEAD");
             if (!hash.empty())
                 hash.pop_back();
 
@@ -765,12 +772,12 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
 
         std::unique_ptr<CManifest> pManifest;
 
-        if (std::filesystem::exists(std::format("{}/hyprpm.toml", m_szWorkingPluginDirectory))) {
+        if (std::filesystem::exists(m_szWorkingPluginDirectory + "/hyprpm.toml")) {
             progress.printMessageAbove(successString("found hyprpm manifest"));
-            pManifest = std::make_unique<CManifest>(MANIFEST_HYPRPM, std::format("{}/hyprpm.toml", m_szWorkingPluginDirectory));
-        } else if (std::filesystem::exists(std::format("{}/hyprload.toml", m_szWorkingPluginDirectory))) {
+            pManifest = std::make_unique<CManifest>(MANIFEST_HYPRPM, m_szWorkingPluginDirectory + "/hyprpm.toml");
+        } else if (std::filesystem::exists(m_szWorkingPluginDirectory + "/hyprload.toml")) {
             progress.printMessageAbove(successString("found hyprload manifest"));
-            pManifest = std::make_unique<CManifest>(MANIFEST_HYPRLOAD, std::format("{}/hyprload.toml", m_szWorkingPluginDirectory));
+            pManifest = std::make_unique<CManifest>(MANIFEST_HYPRLOAD, m_szWorkingPluginDirectory + "/hyprload.toml");
         }
 
         if (!pManifest) {
@@ -805,7 +812,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
 
                 progress.printMessageAbove(successString("commit pin {} matched hl, resetting", plugin));
 
-                execAndGet(std::format("cd {} && git reset --hard --recurse-submodules '{}'", m_szWorkingPluginDirectory, plugin));
+                execAndGet("cd " + m_szWorkingPluginDirectory + " && git reset --hard --recurse-submodules '" + plugin + "'");
             }
 
             if (commitPinFailed)
@@ -837,13 +844,13 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
                     break;
                 }
 
-                out += std::format(" -> {}\n{}\n", *CMD_RAW, execAndGet(*CMD_RAW));
+                out += " -> " + *CMD_RAW + "\n" + execAndGet(*CMD_RAW) + "\n";
             }
 
             if (m_bVerbose)
                 std::println("{}", verboseString("shell returned: {}", out));
 
-            if (!std::filesystem::exists(std::format("{}/{}", m_szWorkingPluginDirectory, p.output))) {
+            if (!std::filesystem::exists(m_szWorkingPluginDirectory + "/" + p.output)) {
                 std::println(stderr,
                              "\n{}\n"
                              "  This likely means that the plugin is either outdated, not yet available for your version, or broken.\n"
@@ -861,9 +868,9 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
         // add repo toml to DataState
         SPluginRepository newrepo = repo;
         newrepo.plugins.clear();
-        execAndGet(std::format("cd {} && git pull --recurse-submodules && git reset --hard --recurse-submodules",
-                               m_szWorkingPluginDirectory)); // repo hash in the state.toml has to match head and not any pin
-        std::string repohash = execAndGet(std::format("cd {} && git rev-parse HEAD", m_szWorkingPluginDirectory));
+        execAndGet("cd " + m_szWorkingPluginDirectory +
+                   " && git pull --recurse-submodules && git reset --hard --recurse-submodules"); // repo hash in the state.toml has to match head and not any pin
+        std::string repohash = execAndGet("cd " + m_szWorkingPluginDirectory + " && git rev-parse HEAD");
         if (!repohash.empty())
             repohash.pop_back();
         // a build failure must not record the fetched hash: the next update would consider the
@@ -872,7 +879,7 @@ bool CPluginManager::updatePlugins(bool forceUpdateAll) {
         for (auto const& p : pManifest->m_plugins) {
             const auto OLDPLUGINIT = std::ranges::find_if(repo.plugins, [&](const auto& other) { return other.name == p.name; });
             newrepo.plugins.emplace_back(SPlugin{.name     = p.name,
-                                                 .filename = std::format("{}/{}", m_szWorkingPluginDirectory, p.output),
+                                                 .filename = m_szWorkingPluginDirectory + "/" + p.output,
                                                  .enabled  = OLDPLUGINIT != repo.plugins.end() ? OLDPLUGINIT->enabled : false,
                                                  .failed   = p.failed});
         }
@@ -1012,7 +1019,7 @@ ePluginLoadStateReturn CPluginManager::ensurePluginsLoadState(bool forceReload) 
     for (auto const& p : loadedPlugins) {
         if (forceReload || !enabled(p)) {
             // unload
-            if (!loadUnloadPlugin(HYPRPMPATH / repoForName(p) / std::format("{}.so", p), false)) {
+            if (!loadUnloadPlugin(HYPRPMPATH / repoForName(p) / (p + ".so"), false)) {
                 std::println("{}", infoString("{} will be unloaded after restarting Hyprland", p));
                 hyprlandVersionMismatch = true;
             } else
@@ -1058,9 +1065,9 @@ bool CPluginManager::loadUnloadPlugin(const std::string& path, bool load) {
     }
 
     if (load)
-        NHyprlandSocket::send(std::format("/plugin load {}", path));
+        NHyprlandSocket::send("/plugin load " + path);
     else
-        NHyprlandSocket::send(std::format("/plugin unload {}", path));
+        NHyprlandSocket::send("/plugin unload " + path);
 
     return true;
 }
@@ -1075,7 +1082,7 @@ void CPluginManager::listAllPlugins() {
             std::println("  │ Plugin {}", p.name);
 
             if (!p.failed)
-                std::println("  └─ enabled: {}", (p.enabled ? std::format("{}true", Colors::GREEN) : std::format("{}false", Colors::RED)));
+                std::println("  └─ enabled: {}", (p.enabled ? std::string{Colors::GREEN} + "true" : std::string{Colors::RED} + "false"));
             else
                 std::println("  └─ enabled: {}Plugin failed to build", Colors::RED);
 
@@ -1085,15 +1092,15 @@ void CPluginManager::listAllPlugins() {
 }
 
 void CPluginManager::notify(const eNotifyIcons icon, uint32_t color, int durationMs, const std::string& message) {
-    NHyprlandSocket::send(std::format("/notify {} {} {} {}", sc<int>(icon), durationMs, color, message));
+    NHyprlandSocket::send("/notify " + std::to_string(icon) + " " + std::to_string(durationMs) + " " + std::to_string(color) + " " + message);
 }
 
 std::string CPluginManager::headerError(const eHeadersErrors err) {
     switch (err) {
-        case HEADERS_CORRUPTED: return failureString("Headers corrupted. Please run hyprpm update to fix those.\n");
-        case HEADERS_MISMATCHED: return failureString("Headers version mismatch. Please run hyprpm update to fix those.\n");
+        case HEADERS_CORRUPTED: return failureString("Headers corrupted. Please file a bug against your distribution's hyprland package.\n");
+        case HEADERS_MISMATCHED: return failureString("Headers version mismatch. Please file a bug against your distribution's hyprland package.\n");
         case HEADERS_NOT_HYPRLAND: return failureString("It doesn't seem you are running on hyprland.\n");
-        case HEADERS_MISSING: return failureString("Headers missing. Please run hyprpm update to fix those.\n");
+        case HEADERS_MISSING: return failureString("Headers missing. Please ensure hyprland-dev is installed and run hyprpm update to fix this.\n");
         case HEADERS_ABI_MISMATCH: return failureString("ABI is mismatched. Please run hyprpm update to fix that.\n");
         case HEADERS_DUPLICATED: {
             return failureString("Headers duplicated!!! This is a very bad sign.\n"
@@ -1126,7 +1133,7 @@ bool CPluginManager::hasDeps() {
     std::vector<std::string> deps       = {"cpio", "cmake", "pkg-config", "g++", "gcc", "git"};
 
     for (auto const& d : deps) {
-        if (!execAndGet(std::format("command -v {}", d)).contains("/")) {
+        if (!execAndGet("command -v " + d).contains("/")) {
             std::println(stderr, "{}", failureString("Missing dependency: {}", d));
             hasAllDeps = false;
         }
@@ -1152,7 +1159,7 @@ std::string CPluginManager::getPluginBuildEnv() {
 }
 
 const std::string& CPluginManager::getPkgConfigPath() {
-    static const auto str = std::format("{}/share/pkgconfig:$PKG_CONFIG_PATH", DataState::getHeadersPath());
+    static const std::string str { LIBDIR "/pkgconfig:$PKG_CONFIG_PATH" };
     return str;
 }
 

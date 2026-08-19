@@ -12,7 +12,7 @@
 #include "../../macros.hpp"
 #include "../../managers/XWaylandManager.hpp"
 #include "../../render/decorations/IHyprWindowDecoration.hpp"
-#include "../../render/transformer/TransformerList.hpp"
+#include "../../render/transformer/Transformer.hpp"
 #include "../DesktopTypes.hpp"
 #include "../types/MultiAnimatedVariable.hpp"
 #include "Popup.hpp"
@@ -46,12 +46,6 @@ namespace Desktop {
 namespace Desktop::View {
 
     class CGroup;
-
-    enum eWindowUpdateSource : uint8_t {
-        WINDOW_UPDATE_ANIMATION = 0,
-        WINDOW_UPDATE_MOUSE,
-        WINDOW_UPDATE_LAYOUT,
-    };
 
     enum eGroupRules : uint8_t {
         // effective only during first map, except for _ALWAYS variant
@@ -242,7 +236,7 @@ namespace Desktop::View {
         UP<Desktop::Rule::CWindowRuleApplicator> m_ruleApplicator;
 
         // Transformers
-        Render::CWindowTransformerList m_transformers;
+        std::vector<UP<Render::IWindowTransformer>> m_transformers;
 
         // animated shadow color
         Config::CGradientValueData m_realShadowColor;
@@ -400,8 +394,6 @@ namespace Desktop::View {
         void                              damageMotionBlur(bool allowStale = false) const;
         void                              recordMotionBlur(const CBox& previous, const CBox& current);
         void                              resetMotionBlur();
-        void                              resetWobble();
-        void                              onPositionUpdate(const CBox& previous, const CBox& current, eWindowUpdateSource source);
         void                              onUpdateState();
         void                              onUpdateMeta();
         void                              onX11ConfigureRequest(CBox box);

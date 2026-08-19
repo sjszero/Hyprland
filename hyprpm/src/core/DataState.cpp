@@ -27,22 +27,22 @@ static std::string getTempRoot() {
 // write the state to a file
 static bool writeState(const std::string& str, const std::string& to) {
     // create temp file in a safe temp root
-    std::ofstream of(std::format("{}.temp-state", getTempRoot()), std::ios::trunc);
+    std::ofstream of(getTempRoot() + ".temp-state", std::ios::trunc);
     if (!of.good())
         return false;
 
     of << str;
     of.close();
 
-    return NSys::root::install(std::format("{}.temp-state", getTempRoot()), to, "644");
+    return NSys::root::install(getTempRoot() + ".temp-state", to, "644");
 }
 
 std::filesystem::path DataState::getDataStatePath() {
-    return std::filesystem::path(std::format("/var/cache/hyprpm/{}", g_pPluginManager->m_szUsername));
+    return std::filesystem::path("/var/cache/hyprpm/" + g_pPluginManager->m_szUsername);
 }
 
 std::string DataState::getHeadersPath() {
-    return getDataStatePath() / "headersRoot";
+    return "/usr";
 }
 
 std::vector<std::filesystem::path> DataState::getPluginStates() {
@@ -64,19 +64,25 @@ std::vector<std::filesystem::path> DataState::getPluginStates() {
 
 void DataState::ensureStateStoreExists() {
     std::error_code ec;
+#if 0
+    // note: getHeadersPath() has been patched to `/usr` and is no longer a
+    // subpath of getDataStatePath()
     if (!std::filesystem::exists(getHeadersPath(), ec) || ec) {
         std::println("{}", infoString("The hyprpm state store doesn't exist. Creating now..."));
         if (!std::filesystem::exists("/var/cache/hyprpm/", ec) || ec) {
             if (!NSys::root::createDirectory("/var/cache/hyprpm", "755"))
                 Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
         }
+#endif
         if (!std::filesystem::exists(getDataStatePath(), ec) || ec) {
             if (!NSys::root::createDirectory(getDataStatePath().string(), "755"))
                 Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
         }
+#if 0
         if (!NSys::root::createDirectory(getHeadersPath(), "755"))
             Debug::die("ensureStateStoreExists: Failed to run a superuser cmd");
     }
+#endif
 }
 
 void DataState::addNewPluginRepo(const SPluginRepository& repo) {
@@ -100,7 +106,7 @@ void DataState::addNewPluginRepo(const SPluginRepository& repo) {
         }}
     };
     for (auto const& p : repo.plugins) {
-        const auto filename = std::format("{}.so", p.name);
+        const auto filename = p.name + ".so";
 
         // copy .so to the good place and chmod 755
         if (std::filesystem::exists(p.filename)) {

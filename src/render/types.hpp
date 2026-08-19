@@ -46,7 +46,7 @@ namespace Render {
 
     enum eRenderProjectionType : uint8_t {
         RPT_MONITOR,
-        RPT_OUTPUT,
+        RPT_MIRROR,
         RPT_FB,
         RPT_EXPORT,
     };
@@ -102,9 +102,8 @@ namespace Render {
         PHLWINDOWREF           currentWindow;
         WP<CWLSurfaceResource> surface;
 
-        bool                   transformDamage            = true;
-        bool                   noSimplify                 = false;
-        bool                   renderingTransformedSource = false;
+        bool                   transformDamage = true;
+        bool                   noSimplify      = false;
     };
 
     struct STFRange {

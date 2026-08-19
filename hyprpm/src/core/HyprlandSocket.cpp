@@ -38,10 +38,12 @@ static int getUID() {
 static std::string getRuntimeDir() {
     const auto XDG = getenv("XDG_RUNTIME_DIR");
 
-    if (!XDG)
-        return std::format("/run/user/{}/hypr", getUID());
+    if (!XDG) {
+        const std::string USERID = std::to_string(getUID());
+        return "/run/user/" + USERID + "/hypr";
+    }
 
-    return std::format("{}/hypr", XDG);
+    return std::string{XDG} + "/hypr";
 }
 
 std::string NHyprlandSocket::send(const std::string& cmd) {
@@ -62,12 +64,12 @@ std::string NHyprlandSocket::send(const std::string& cmd) {
     sockaddr_un serverAddress = {0};
     serverAddress.sun_family  = AF_UNIX;
 
-    std::string socketPath = std::format("{}/{}/.socket.sock", getRuntimeDir(), HIS);
+    std::string socketPath = getRuntimeDir() + "/" + HIS + "/.socket.sock";
 
     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
 
     if (connect(SERVERSOCKET, rc<sockaddr*>(&serverAddress), SUN_LEN(&serverAddress)) < 0) {
-        std::println("{}", failureString("Couldn't connect to {}. (4)", socketPath));
+        std::println("{}", failureString("Couldn't connect to " + socketPath + ". (4)"));
         return "";
     }
 

@@ -1,6 +1,6 @@
 #include "LayoutManager.hpp"
 
-#include "../ipc/s2/S2.hpp"
+#include "../managers/EventManager.hpp"
 #include "../managers/fullscreen/FullscreenController.hpp"
 #include "space/Space.hpp"
 #include "target/Target.hpp"
@@ -44,10 +44,10 @@ void CLayoutManager::changeFloatingMode(SP<ITarget> target) {
     if (pastFsMode != Fullscreen::FSMODE_NONE)
         Fullscreen::controller()->setFullscreenMode(target->window(), pastFsMode);
 
-    IPC::Socket2::sock()->postEvent({
+    g_pEventManager->postEvent(SHyprIPCEvent({
         .event = "changefloatingmode",
         .data  = std::format("{:x},{}", rc<uintptr_t>(target->window().get()), sc<int>(target->floating())),
-    });
+    }));
     Event::bus()->m_events.window.floating.emit(target->window());
 }
 

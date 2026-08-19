@@ -81,7 +81,7 @@ Vector2D CWLSurface::getViewporterCorrectedSize() const {
     return m_resource->m_current.viewport.hasDestination ? m_resource->m_current.viewport.destination : m_resource->m_current.bufferSize;
 }
 
-CRegion CWLSurface::computeDamage(const std::optional<CBox>& box) const {
+CRegion CWLSurface::computeDamage() const {
     if (!m_resource->m_current.texture)
         return {};
 
@@ -107,6 +107,7 @@ CRegion CWLSurface::computeDamage(const std::optional<CBox>& box) const {
 
     // go from buffer coords in the damage to hl logical
 
+    const auto BOX      = getSurfaceBoxGlobal();
     const auto SURFSIZE = m_resource->m_current.size;
     if (SURFSIZE.x <= 0 || SURFSIZE.y <= 0)
         return {};
@@ -114,8 +115,8 @@ CRegion CWLSurface::computeDamage(const std::optional<CBox>& box) const {
     const Vector2D SCALE = SURFSIZE / m_resource->m_current.bufferSize;
 
     damage.scale(SCALE);
-    if (box.has_value()) {
-        auto boxSize = box->size();
+    if (BOX.has_value()) {
+        auto boxSize = BOX->size();
 
         if (m_view->type() == VIEW_TYPE_WINDOW) {
             const auto WINDOW = dynamicPointerCast<CWindow>(m_view.lock());

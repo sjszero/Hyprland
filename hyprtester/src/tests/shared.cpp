@@ -5,7 +5,6 @@
 #include <thread>
 #include <print>
 #include <fstream>
-#include <format>
 #include "../shared.hpp"
 #include "../hyprctlCompat.hpp"
 
@@ -105,7 +104,7 @@ bool Tests::killAllWindows() {
     auto pos = str.find("Window ");
     while (pos != std::string::npos) {
         auto pos2 = str.find(" -> ", pos);
-        getFromSocket(std::format("/dispatch hl.dsp.window.kill({{ window = 'address:0x{}' }})", str.substr(pos + 7, pos2 - pos - 7)));
+        getFromSocket("/dispatch hl.dsp.window.kill({ window = 'address:0x" + str.substr(pos + 7, pos2 - pos - 7) + "' })");
         pos = str.find("Window ", pos + 5);
     }
 

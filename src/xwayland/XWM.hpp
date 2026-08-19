@@ -216,7 +216,7 @@ class CXWM {
     std::vector<SP<CX11DataOffer>>            m_dndDataOffers;
 
     inline xcb_connection_t*                  getConnection() {
-        return m_connection ? *m_connection : nullptr;
+        return m_connection ? static_cast<xcb_connection_t*>(*m_connection) : nullptr;
     }
     struct {
         CHyprSignalListener newWLSurface;

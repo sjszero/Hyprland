@@ -24,7 +24,7 @@
 #include "../protocols/core/Compositor.hpp"
 #include "../protocols/core/DataDevice.hpp"
 #include "../render/Renderer.hpp"
-#include "../ipc/s2/S2.hpp"
+#include "../managers/EventManager.hpp"
 #include "../managers/screenshare/ScreenshareManager.hpp"
 #include "../animation/AnimationManager.hpp"
 #include "../animation/WorkspaceAnimationController.hpp"
@@ -276,7 +276,6 @@ void CMonitor::onConnect(bool noRule) {
 
         m_output->state->resetExplicitFences();
         m_output->state->setEnabled(false);
-        m_usedAsyncBuffers.clear();
 
         if (!m_state.commit())
             Log::logger->log(Log::ERR, "Couldn't commit disabled state on output {}", m_name);
@@ -385,8 +384,8 @@ void CMonitor::onConnect(bool noRule) {
 
     m_events.connect.emit();
 
-    IPC::Socket2::sock()->postEvent({"monitoradded", m_name});
-    IPC::Socket2::sock()->postEvent({"monitoraddedv2", std::format("{},{},{}", m_id, m_name, m_shortDescription)});
+    g_pEventManager->postEvent(SHyprIPCEvent{"monitoradded", m_name});
+    g_pEventManager->postEvent(SHyprIPCEvent{"monitoraddedv2", std::format("{},{},{}", m_id, m_name, m_shortDescription)});
     Event::bus()->m_events.monitor.added.emit(m_self.lock());
 }
 
@@ -395,8 +394,8 @@ void CMonitor::onDisconnect(bool destroy) {
     CScopeGuard x = {[this]() {
         if (g_pCompositor->m_isShuttingDown)
             return;
-        IPC::Socket2::sock()->postEvent({"monitorremoved", m_name});
-        IPC::Socket2::sock()->postEvent({"monitorremovedv2", std::format("{},{},{}", m_id, m_name, m_shortDescription)});
+        g_pEventManager->postEvent(SHyprIPCEvent{"monitorremoved", m_name});
+        g_pEventManager->postEvent(SHyprIPCEvent{"monitorremovedv2", std::format("{},{},{}", m_id, m_name, m_shortDescription)});
         Event::bus()->m_events.monitor.removed.emit(m_self.lock());
         State::monitorLayoutController()->scheduleRecheck();
     }};
@@ -762,7 +761,8 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
         std::ranges::sort(sortedModes, sortFunc);
         if (sortedModes.size() > 3)
             sortedModes.erase(sortedModes.begin() + 3, sortedModes.end());
-        requestedModes.insert_range(requestedModes.end(), sortedModes | std::views::reverse);
+        auto x = sortedModes | std::views::reverse;
+        requestedModes.insert(requestedModes.end(), x.cbegin(), x.cend());
     };
 
     // last fallback is always preferred mode
@@ -1032,7 +1032,7 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
                     m_scale = std::round(scaleZero);
                 else {
                     Log::logger->log(Log::ERR, "Invalid scale passed to monitor, {} failed to find a clean divisor", m_scale);
-                    ErrorOverlay::overlay()->queueError(std::format("Invalid scale passed to monitor {}, failed to find a clean divisor", m_name));
+                    ErrorOverlay::overlay()->queueError("Invalid scale passed to monitor " + m_name + ", failed to find a clean divisor");
                     m_scale = getDefaultScale();
                 }
             } else {
@@ -1060,7 +1060,7 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
     m_size            = (xfmd / m_scale).round();
     m_transformedSize = xfmd;
 
-    if (WAS10B != m_enabled10bit || OLDPIXELSIZE != m_pixelSize || OLDTRANSFORMEDSIZE != m_transformedSize) {
+    if ((WAS10B != m_enabled10bit || OLDPIXELSIZE != m_pixelSize)) {
         m_resources.reset(); // TODO skip for 10bit change and fp16?
 
         if (g_pHyprRenderer && g_pHyprRenderer->glBackend())
@@ -1069,10 +1069,8 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
 
     applyMonitorRuleSoft(std::move(pMonitorRule));
 
-    if (OLD_PIXEL_SIZE != m_pixelSize || OLDTRANSFORMEDSIZE != m_transformedSize) {
+    if (OLD_PIXEL_SIZE != m_pixelSize)
         m_background.reset();
-        m_splash.reset();
-    }
 
     updateVCGTRamps();
 
@@ -1505,8 +1503,8 @@ void CMonitor::changeWorkspace(const PHLWORKSPACE& pWorkspace, bool internal, bo
 
         g_layoutManager->recalculateMonitor(m_self.lock(), Layout::CLayoutManager::RECALCULATE_MONITOR_REASON_WORKSPACE_CHANGE);
 
-        IPC::Socket2::sock()->postEvent({"workspace", pWorkspace->m_name});
-        IPC::Socket2::sock()->postEvent({"workspacev2", std::format("{},{}", pWorkspace->m_id, pWorkspace->m_name)});
+        g_pEventManager->postEvent(SHyprIPCEvent{"workspace", pWorkspace->m_name});
+        g_pEventManager->postEvent(SHyprIPCEvent{"workspacev2", std::format("{},{}", pWorkspace->m_id, pWorkspace->m_name)});
         Event::bus()->m_events.workspace.active.emit(pWorkspace);
     }
 
@@ -1567,8 +1565,8 @@ void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace) {
         if (m_activeSpecialWorkspace) {
             m_activeSpecialWorkspace->m_visible = false;
             Animation::Workspace::startAnimation(m_activeSpecialWorkspace, Animation::Workspace::ANIMATION_TYPE_OUT, false);
-            IPC::Socket2::sock()->postEvent({"activespecial", std::format(",{}", m_name)});
-            IPC::Socket2::sock()->postEvent({"activespecialv2", std::format(",,{}", m_name)});
+            g_pEventManager->postEvent(SHyprIPCEvent{"activespecial", "," + m_name});
+            g_pEventManager->postEvent(SHyprIPCEvent{"activespecialv2", ",," + m_name});
 
             // Reset layer surface state when closing special workspace
             for (auto const& ls : Desktop::layerState()->layers()) {
@@ -1616,8 +1614,8 @@ void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace) {
         PMONITOR->m_activeSpecialWorkspace.reset();
         g_layoutManager->recalculateMonitor(PMONITOR, Layout::CLayoutManager::RECALCULATE_MONITOR_REASON_TOGGLE_SPECIAL_WORKSPACE);
         g_pHyprRenderer->damageMonitor(PMONITOR);
-        IPC::Socket2::sock()->postEvent({"activespecial", std::format(",{}", PMONITOR->m_name)});
-        IPC::Socket2::sock()->postEvent({"activespecialv2", std::format(",,{}", PMONITOR->m_name)});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activespecial", "," + PMONITOR->m_name});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activespecialv2", ",," + PMONITOR->m_name});
 
         // Reset layer surfaces on the old monitor when special workspace is stolen
         for (auto const& ls : Desktop::layerState()->layers()) {
@@ -1688,8 +1686,8 @@ void CMonitor::setSpecialWorkspace(const PHLWORKSPACE& pWorkspace) {
             g_pInputManager->refocus();
     }
 
-    IPC::Socket2::sock()->postEvent({"activespecial", std::format("{},{}", pWorkspace->m_name, m_name)});
-    IPC::Socket2::sock()->postEvent({"activespecialv2", std::format("{},{},{}", pWorkspace->m_id, pWorkspace->m_name, m_name)});
+    g_pEventManager->postEvent(SHyprIPCEvent{"activespecial", pWorkspace->m_name + "," + m_name});
+    g_pEventManager->postEvent(SHyprIPCEvent{"activespecialv2", std::to_string(pWorkspace->m_id) + "," + pWorkspace->m_name + "," + m_name});
 
     g_pHyprRenderer->damageMonitor(m_self.lock());
 
@@ -2068,12 +2066,6 @@ uint16_t CMonitor::isDSBlocked(bool full) {
         return reasons;
     }
 
-    if (PCANDIDATE->m_transformers.blocksDirectScanout()) {
-        reasons |= DS_BLOCK_TRANSFORM;
-        if (!full)
-            return reasons;
-    }
-
     const auto PSURFACE = PCANDIDATE->getSolitaryResource();
     if (!PSURFACE || !PSURFACE->m_current.texture || !PSURFACE->m_current.buffer) {
         reasons |= DS_BLOCK_SURFACE;
@@ -2343,7 +2335,6 @@ void CMonitor::setDPMS(bool on) {
 
                 // commit DPMS to disable the monitor, it's fully black now
                 commitDPMSState(false);
-                m_usedAsyncBuffers.clear();
             },
             true);
     }
@@ -2352,8 +2343,6 @@ void CMonitor::setDPMS(bool on) {
 void CMonitor::commitDPMSState(bool state) {
     m_output->state->resetExplicitFences();
     m_output->state->setEnabled(state);
-    if (!state)
-        m_usedAsyncBuffers.clear();
 
     if (!m_state.commit()) {
         Log::logger->log(Log::ERR, "Couldn't commit output {} for DPMS = {}, will retry.", m_name, state);
@@ -2369,9 +2358,6 @@ void CMonitor::commitDPMSState(bool state) {
 
                 m_output->state->resetExplicitFences();
                 m_output->state->setEnabled(m_dpmsStatus);
-                if (!m_dpmsStatus)
-                    m_usedAsyncBuffers.clear();
-
                 if (!m_state.commit()) {
                     Log::logger->log(Log::ERR, "Couldn't retry committing output {} for DPMS = {}", m_name, m_dpmsStatus);
                     return;
@@ -2756,8 +2742,8 @@ bool CMonitor::useFP16() {
         return true;
     };
 
-    // Auto: use FP16 if the monitor is not sRGB or is 10 bit
-    bool        shouldUse  = g_pHyprRenderer->fp16Supported() && (*PFP16 == 1 || (*PFP16 == 2 && (!isSRGB() || m_enabled10bit)));
+    // Auto: use FP16 if the monitor is not sRGB
+    bool        shouldUse  = *PFP16 == 1 || (*PFP16 == 2 && !isSRGB());
     static bool usedBefore = shouldUse;
     if (usedBefore != shouldUse) {
         usedBefore    = shouldUse;
@@ -2803,8 +2789,8 @@ WP<CMonitorResources> CMonitor::resources() {
     const auto DRM_FORMAT = useFP16() ? DRM_FORMAT_ABGR16161616F : m_output->state->state().drmFormat;
     const auto DESC       = workBufferImageDescription();
 
-    if (!m_resources || m_resources->m_drmFormat != DRM_FORMAT || m_resources->m_size != m_transformedSize)
-        m_resources = makeUnique<CMonitorResources>(m_self, DRM_FORMAT, m_transformedSize, DESC);
+    if (!m_resources || m_resources->m_drmFormat != DRM_FORMAT || m_resources->m_size != m_pixelSize)
+        m_resources = makeUnique<CMonitorResources>(m_self, DRM_FORMAT, m_pixelSize, DESC);
 
     if (m_resources->m_imageDescription != DESC)
         m_resources->setImageDescription(DESC);

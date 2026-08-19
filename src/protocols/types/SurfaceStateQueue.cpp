@@ -6,10 +6,8 @@
 CSurfaceStateQueue::CSurfaceStateQueue(WP<CWLSurfaceResource> surf) : m_surface(std::move(surf)) {}
 
 void CSurfaceStateQueue::clear() {
-    for (const auto& state : m_queue) {
-        state->cancelFenceWaiter();
+    for (auto& state : m_queue)
         PROTO::presentation->discardFeedbacks(state->presentationFeedbacks);
-    }
 
     m_queue.clear();
 }
@@ -19,11 +17,10 @@ WP<SSurfaceState> CSurfaceStateQueue::enqueue(UP<SSurfaceState>&& state) {
 }
 
 void CSurfaceStateQueue::dropState(const WP<SSurfaceState>& state) {
-    const auto& it = find(state);
+    auto it = find(state);
     if (it == m_queue.end())
         return;
 
-    (*it)->cancelFenceWaiter();
     PROTO::presentation->discardFeedbacks((*it)->presentationFeedbacks);
 
     m_queue.erase(it);
@@ -31,7 +28,7 @@ void CSurfaceStateQueue::dropState(const WP<SSurfaceState>& state) {
 
 void CSurfaceStateQueue::lock(const WP<SSurfaceState>& weakState, eLockReason reason) {
     ASSERT(reason != LOCK_REASON_NONE);
-    const auto& it = find(weakState);
+    auto it = find(weakState);
     if (it == m_queue.end())
         return;
 
@@ -40,7 +37,7 @@ void CSurfaceStateQueue::lock(const WP<SSurfaceState>& weakState, eLockReason re
 
 void CSurfaceStateQueue::unlock(const WP<SSurfaceState>& state, eLockReason reason) {
     ASSERT(reason != LOCK_REASON_NONE);
-    const auto& it = find(state);
+    auto it = find(state);
     if (it == m_queue.end())
         return;
 
@@ -48,25 +45,9 @@ void CSurfaceStateQueue::unlock(const WP<SSurfaceState>& state, eLockReason reas
     tryProcess();
 }
 
-void CSurfaceStateQueue::unlockFence(const WP<SSurfaceState>& state) {
-    auto it = find(state);
-    if (it == m_queue.end())
-        return;
-
-    for (const auto& s : m_queue) {
-        if (!s->fenceSignaled())
-            continue;
-
-        s->lockMask &= ~LOCK_REASON_FENCE;
-        s->cancelFenceWaiter();
-    }
-
-    tryProcess();
-}
-
 void CSurfaceStateQueue::unlockFirst(eLockReason reason) {
     ASSERT(reason != LOCK_REASON_NONE);
-    for (const auto& it : m_queue) {
+    for (auto& it : m_queue) {
         if ((it->lockMask & reason) != LOCK_REASON_NONE) {
             it->lockMask &= ~reason;
             break;
@@ -93,17 +74,11 @@ auto CSurfaceStateQueue::find(const WP<SSurfaceState>& state) -> std::deque<UP<S
 void CSurfaceStateQueue::tryProcess() {
     while (!m_queue.empty()) {
         auto& front = m_queue.front();
+        if (front->lockMask & LOCK_REASON_FIFO && !m_surface->m_current.barrierSet)
+            front->lockMask &= ~LOCK_REASON_FIFO;
 
-        if (front->isLocked())
-            break;
-
-        auto next = std::next(m_queue.begin());
-        if (next != m_queue.end() && !(*next)->isLocked()) {
-            front->mergeFrom(**next);
-            (*next)->cancelFenceWaiter();
-            m_queue.erase(next);
-            continue;
-        }
+        if (front->lockMask != LOCK_REASON_NONE)
+            return;
 
         m_surface->commitState(*front);
         m_queue.pop_front();

@@ -30,6 +30,7 @@ endif()
 
 add_executable(hyprpm ${SRCFILES})
 set_target_properties(hyprpm PROPERTIES CXX_VISIBILITY_PRESET hidden)
+add_compile_definitions(LIBDIR="${CMAKE_INSTALL_FULL_LIBDIR}")
 
 target_link_libraries(hyprpm PUBLIC PkgConfig::hyprpm_deps glaze::glaze)
 

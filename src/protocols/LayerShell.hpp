@@ -76,7 +76,6 @@ class CLayerShellResource {
 
   private:
     SP<CZwlrLayerSurfaceV1> m_resource;
-    void                    markPending(eCommittedState state);
 
     struct {
         CHyprSignalListener commitSurface;

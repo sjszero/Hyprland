@@ -1,3 +1,27 @@
+hyprland (0.56.2+ds-1) unstable; urgency=medium
+
+  * New upstream version 0.56.2+ds
+
+ -- Chow Loong Jin <hyperair@debian.org>  Thu, 06 Aug 2026 11:33:07 +0800
+
+hyprland (0.56.1+ds-1) unstable; urgency=medium
+
+  * New upstream version 0.56.1+ds
+  * d/control: Bump hyprutils version to match CMakeLists.txt
+  * d/patches: Refresh patches and drop upstreamed
+
+ -- Chow Loong Jin <hyperair@debian.org>  Wed, 29 Jul 2026 13:18:11 +0800
+
+hyprland (0.56.0+ds-1) unstable; urgency=medium
+
+  * New upstream version 0.56.0+ds
+  * d/control: Update build-deps to match CMakeLists.txt
+  * d/patches: Refresh patches
+  * d/patches/gcc-port.patch: Add one more backport to c++20
+  * Backport patch to fix hyprctl binds json output
+
+ -- Chow Loong Jin <hyperair@debian.org>  Thu, 23 Jul 2026 15:52:33 +0800
+
 hyprland (0.55.4+ds-2) unstable; urgency=medium
 
   * Bump wayland-protocols version to 1.48

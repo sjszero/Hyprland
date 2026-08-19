@@ -32,8 +32,6 @@ enum eShaderUniform : uint8_t {
     SHADER_DISCARD_ALPHA_VALUE,
     SHADER_SHADER_VAO,
     SHADER_SHADER_VBO,
-    SHADER_SHADER_UV_VAO,
-    SHADER_SHADER_UV_VBO,
     SHADER_TOP_LEFT,
     SHADER_BOTTOM_RIGHT,
     SHADER_WINDOW_TOP_LEFT,
@@ -117,10 +115,13 @@ class CShader {
     GLint  getUniformLocation(eShaderUniform location) const;
     int    getInitialTime() const;
     void   setInitialTime(int time);
+    bool   usesCustomUV() const;
+    void   setUsesCustomUV(bool usesCustomUV);
 
   private:
-    GLuint                         m_program     = 0;
-    float                          m_initialTime = 0;
+    GLuint                         m_program      = 0;
+    float                          m_initialTime  = 0;
+    bool                           m_usesCustomUV = false;
     std::array<GLint, SHADER_LAST> m_uniformLocations;
 
     struct SUniformMatrix3Data {

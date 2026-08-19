@@ -238,15 +238,11 @@ CXDGToplevelResource::CXDGToplevelResource(SP<CXdgToplevel> resource_, SP<CXDGSu
 
     m_resource->setSetMaxSize([this](CXdgToplevel* r, int32_t x, int32_t y) {
         m_pending.maxSize = {x, y};
-        if (m_owner && m_owner->m_surface)
-            m_owner->m_surface->m_pending.updated.bits.xdgshell = true;
         m_events.sizeLimitsChanged.emit();
     });
 
     m_resource->setSetMinSize([this](CXdgToplevel* r, int32_t x, int32_t y) {
         m_pending.minSize = {x, y};
-        if (m_owner && m_owner->m_surface)
-            m_owner->m_surface->m_pending.updated.bits.xdgshell = true;
         m_events.sizeLimitsChanged.emit();
     });
 
@@ -612,8 +608,6 @@ CXDGSurfaceResource::CXDGSurfaceResource(SP<CXdgSurface> resource_, SP<CXDGWMBas
     m_resource->setSetWindowGeometry([this](CXdgSurface* r, int32_t x, int32_t y, int32_t w, int32_t h) {
         LOGM(Log::DEBUG, "xdg_surface {:x} requests geometry {}x{} {}x{}", (uintptr_t)this, x, y, w, h);
         m_pending.geometry = {x, y, w, h};
-        if (m_surface)
-            m_surface->m_pending.updated.bits.xdgshell = true;
     });
 }
 

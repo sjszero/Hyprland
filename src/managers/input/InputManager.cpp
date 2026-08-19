@@ -7,7 +7,7 @@
 #include <algorithm>
 #include "../../config/ConfigValue.hpp"
 #include "../../config/shared/actions/ConfigActions.hpp"
-#include "../../config/ConfigManager.hpp"
+#include "../../config/legacy/ConfigManager.hpp"
 
 #include "../../desktop/view/WLSurface.hpp"
 #include "../../desktop/state/FocusState.hpp"
@@ -41,7 +41,7 @@
 #include "../../managers/KeybindManager.hpp"
 #include "../../managers/fullscreen/FullscreenController.hpp"
 
-#include "../../ipc/s2/S2.hpp"
+#include "../../managers/EventManager.hpp"
 #include "../../managers/permissions/DynamicPermissionManager.hpp"
 #include "../../state/MonitorState.hpp"
 #include "../../state/MonitorLayoutController.hpp"
@@ -950,7 +950,7 @@ void CInputManager::processMouseDownKill(const IPointer::SButtonEvent& e) {
                 break;
             }
 
-            IPC::Socket2::sock()->postEvent({.event = "kill", .data = std::format("{:x}", rc<uintptr_t>(PWINDOW.m_data))});
+            g_pEventManager->postEvent(SHyprIPCEvent({.event = "kill", .data = std::format("{:x}", rc<uintptr_t>(PWINDOW.m_data))}));
             Event::bus()->m_events.window.kill.emit(PWINDOW);
 
             // kill the mf
@@ -1186,7 +1186,7 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
             g_pKeybindManager->m_keyToCodeCache.clear();
         }
 
-        IPC::Socket2::sock()->postEvent({"activelayout", std::format("{},{}", PKEEB->m_hlName, LAYOUT)});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activelayout", PKEEB->m_hlName + "," + LAYOUT});
         Event::bus()->m_events.input.keyboard.layout.emit(PKEEB, LAYOUT);
     });
 
@@ -1287,7 +1287,7 @@ void CInputManager::applyConfigToKeyboard(SP<IKeyboard> pKeyboard) {
 
     const auto LAYOUTSTR = pKeyboard->getActiveLayout();
 
-    IPC::Socket2::sock()->postEvent({"activelayout", std::format("{},{}", pKeyboard->m_hlName, LAYOUTSTR)});
+    g_pEventManager->postEvent(SHyprIPCEvent{"activelayout", pKeyboard->m_hlName + "," + LAYOUTSTR});
     Event::bus()->m_events.input.keyboard.layout.emit(pKeyboard, LAYOUTSTR);
 
     Log::logger->log(Log::DEBUG, "Set the keyboard layout to {} and variant to {} for keyboard \"{}\"", pKeyboard->m_currentRules.layout, pKeyboard->m_currentRules.variant,
@@ -1728,7 +1728,7 @@ void CInputManager::onKeyboardMod(SP<IKeyboard> pKeyboard) {
 
         Log::logger->log(Log::DEBUG, "LAYOUT CHANGED TO {} GROUP {}", LAYOUT, MODS.group);
 
-        IPC::Socket2::sock()->postEvent({"activelayout", std::format("{},{}", pKeyboard->m_hlName, LAYOUT)});
+        g_pEventManager->postEvent(SHyprIPCEvent{"activelayout", pKeyboard->m_hlName + "," + LAYOUT});
         Event::bus()->m_events.input.keyboard.layout.emit(pKeyboard, LAYOUT);
     }
 }
@@ -2121,9 +2121,7 @@ std::string CInputManager::getNameForNewDevice(std::string internalName) {
     auto proposedNewName = deviceNameToInternalString(internalName);
     int  dupeno          = 0;
 
-    auto makeNewName = [&]() {
-        return std::format("{}{}", proposedNewName.empty() ? "unknown-device" : proposedNewName, dupeno == 0 ? std::string{} : std::format("-{}", dupeno));
-    };
+    auto makeNewName = [&]() { return (proposedNewName.empty() ? "unknown-device" : proposedNewName) + (dupeno == 0 ? "" : ("-" + std::to_string(dupeno))); };
 
     while (std::ranges::find_if(m_hids, [&](const auto& other) { return other->m_hlName == makeNewName(); }) != m_hids.end())
         dupeno++;

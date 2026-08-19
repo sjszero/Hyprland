@@ -13,7 +13,7 @@ Forwarded: not-needed
  2 files changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 52abd42..36195ca 100644
+index 9ef49eb..3c525f6 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -33,6 +33,11 @@ if(NOT HYPR_SHADER_GEN_RESULT EQUAL 0)

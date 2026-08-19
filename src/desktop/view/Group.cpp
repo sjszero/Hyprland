@@ -9,7 +9,7 @@
 #include "../../layout/LayoutManager.hpp"
 #include "../../desktop/state/FocusState.hpp"
 #include "../../Compositor.hpp"
-#include "../../ipc/s2/S2.hpp"
+#include "../../managers/EventManager.hpp"
 #include "../../managers/fullscreen/FullscreenController.hpp"
 
 #include <algorithm>
@@ -63,7 +63,7 @@ void CGroup::init() {
 
     updateWindowVisibility();
 
-    IPC::Socket2::sock()->postEvent({.event = "togglegroup", .data = std::format("1,{:x}", rc<uintptr_t>(m_windows.at(0).get()))});
+    g_pEventManager->postEvent(SHyprIPCEvent({.event = "togglegroup", .data = std::format("1,{:x}", rc<uintptr_t>(m_windows.at(0).get()))}));
 }
 
 void CGroup::destroy() {
@@ -79,7 +79,7 @@ void CGroup::destroy() {
     }
 
     if (POWNER)
-        IPC::Socket2::sock()->postEvent({.event = "togglegroup", .data = std::format("0,{:x}", rc<uintptr_t>(POWNER.get()))});
+        g_pEventManager->postEvent(SHyprIPCEvent({.event = "togglegroup", .data = std::format("0,{:x}", rc<uintptr_t>(POWNER.get()))}));
 }
 
 CGroup::~CGroup() {

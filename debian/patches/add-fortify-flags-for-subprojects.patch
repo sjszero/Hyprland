@@ -13,7 +13,7 @@ for verifying fortification on binaries.
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4d83b5c..52abd42 100644
+index cf7f53a..9ef49eb 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -114,7 +114,8 @@ add_compile_options(

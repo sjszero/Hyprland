@@ -33,6 +33,11 @@ if(NOT HYPR_SHADER_GEN_RESULT EQUAL 0)
   )
 endif()
 
+execute_process(COMMAND xxd -i
+                INPUT_FILE ./example/hyprland.lua
+                OUTPUT_FILE ./src/config/lua/DefaultConfigBytes.hpp
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 find_package(PkgConfig REQUIRED)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -114,7 +119,8 @@ add_compile_options(
   -Wno-pointer-arith
   -Wno-clobbered
   -frtti
-  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
+  -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=
+  -D_FORTIFY_SOURCE=2)
 
 # disable lto as it may break plugins
 add_compile_options(-fno-lto)
@@ -130,7 +136,7 @@ set(GLES_VERSION "GLES3")
 find_package(OpenGL REQUIRED COMPONENTS ${GLES_VERSION})
 find_package(glslang CONFIG REQUIRED)
 
-find_package(glaze QUIET)
+find_package(glaze 7...<8 QUIET)
 if(NOT glaze_FOUND)
   set(GLAZE_VERSION v7.2.0)
   message(STATUS "glaze dependency not found, retrieving ${GLAZE_VERSION} with FetchContent")
@@ -306,6 +312,33 @@ add_library(hyprland_lib STATIC ${SRCFILES})
 add_executable(Hyprland src/main.cpp ${TRACY_CPP_FILES})
 target_link_libraries(Hyprland hyprland_lib)
 
+# debian dumpabiver helper
+pkg_check_modules(
+  dumpabiver_deps
+  REQUIRED
+  IMPORTED_TARGET GLOBAL
+  libcrypto
+)
+add_executable(dumpabiver debian/dumpabiver.cpp)
+target_include_directories(dumpabiver PUBLIC ${dumpabiver_deps_INCLUDE_DIRS})
+target_link_libraries(dumpabiver hyprland_lib PkgConfig::dumpabiver_deps)
+
+add_custom_command(
+  OUTPUT debian-abi-helper
+  COMMAND dumpabiver > debian-abi-helper
+  DEPENDS dumpabiver
+)
+add_custom_target(
+  generate_abihelper
+  ALL
+  DEPENDS debian-abi-helper
+)
+install(
+  FILES ${CMAKE_BINARY_DIR}/debian-abi-helper
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/hyprland
+)
+# end dumpabiver stuff
+
 target_include_directories(hyprland_lib PUBLIC ${deps_INCLUDE_DIRS} ${LUA_INCLUDE_DIRS})
 target_include_directories(Hyprland PUBLIC ${deps_INCLUDE_DIRS} ${LUA_INCLUDE_DIRS})
 target_link_libraries(hyprland_lib PRIVATE glaze::glaze)
@@ -373,15 +406,6 @@ check_include_file("sys/inotify.h" HAS_INOTIFY)
 pkg_check_modules(inotify IMPORTED_TARGET libinotify)
 if(NOT HAS_INOTIFY AND inotify_FOUND)
   target_link_libraries(hyprland_lib PUBLIC PkgConfig::inotify)
-endif()
-
-# sdbus-c++ is used to ask rtkit for realtime scheduling which is Linux-only
-if(NO_RTKIT OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(STATUS "rtkit realtime scheduling is disabled!")
-else()
-  pkg_check_modules(sdbus_dep REQUIRED IMPORTED_TARGET sdbus-c++>=2.0.0)
-  target_link_libraries(hyprland_lib PUBLIC PkgConfig::sdbus_dep)
-  add_compile_definitions(HAS_RTKIT)
 endif()
 
 if(NO_XWAYLAND)
@@ -682,7 +706,7 @@ install(FILES ${MANPAGES} DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
 # pkgconfig entry
 install(FILES ${CMAKE_BINARY_DIR}/hyprland.pc
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 # protocol headers
 set(HEADERS_PROTO "${CMAKE_CURRENT_SOURCE_DIR}/protocols")

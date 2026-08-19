@@ -266,7 +266,7 @@ void CImageCopyCaptureCursorSession::createFrame(SP<CExtImageCopyCaptureFrameV1>
     // we should always copy over the entire cursor image, it doesn't cost much
     m_frameResource->sendDamage(0, 0, m_bufferSize.x, m_bufferSize.y);
 
-    // Images are always sent in NORMAL transforms
+    // the cursor is never transformed... probably?
     m_frameResource->sendTransform(WL_OUTPUT_TRANSFORM_NORMAL);
 }
 

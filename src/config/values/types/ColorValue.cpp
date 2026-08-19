@@ -2,8 +2,7 @@
 
 using namespace Config::Values;
 
-CColorValue::CColorValue(const char* name, const char* description, Config::INTEGER def, SColorValueOptions&& options) :
-    IValue(options.refresh, options.deprecationNotice), m_default(def) {
+CColorValue::CColorValue(const char* name, const char* description, Config::INTEGER def, SColorValueOptions&& options) : IValue(options.refresh), m_default(def) {
     m_name        = name;
     m_description = description;
 }

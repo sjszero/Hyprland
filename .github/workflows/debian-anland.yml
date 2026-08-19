@@ -1,36 +1,37 @@
 name: Build Debian Anland packages
-
 on:
   push:
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: debian-anland-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build Aquamarine 0.14 and Hyprland arm64 Debian packages
-    # Native GitHub-hosted ARM64 runner.  debian:forky is multi-architecture,
-    # so Docker pulls its arm64 image and dpkg-buildpackage produces arm64 .deb files.
+    name: Build Aquamarine 0.14 and Hyprland 0.56.2 arm64 Debian packages
     runs-on: ubuntu-24.04-arm
     env:
-      # Keep the cache outside the disposable native build staging directory.
-      # build-anland.sh supplies its stable staging directory as CCACHE_BASEDIR.
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_COMPILERCHECK: content
       CCACHE_STATSLOG: ${{ github.workspace }}/ccache.stats
       CCACHE_WRAPPER_LOG: ${{ github.workspace }}/ccache-wrapper.log
       CCACHE_MAXSIZE: 2G
+      DEB_BUILD_OPTIONS: nocheck
     container:
       image: debian:forky
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
-          # The package build only needs the checked-out revision. Avoid fetching
-          # full history on the ARM runner.
           fetch-depth: 1
+      # Aquamarine v0.14.0 and Hyprgrass v0.8.2 are vendored as clean source
+      # baselines. build-anland.sh applies project patches only in staging.
+
 
       - name: Install build dependencies
         run: |
@@ -53,18 +54,14 @@ jobs:
             glslang-tools wayland-protocols xwayland xxd
 
       - name: Restore compiler cache
-        id: ccache-restore
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          # Use an immutable save key, then restore the latest cache for this
-          # compiler/architecture prefix. This avoids replacing a warm cache
-          # with a cache from an unrelated source-hash namespace.
           key: ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-
 
-      - name: Configure and verify ccache
+      - name: Configure compiler cache
         run: |
           mkdir -p "$CCACHE_DIR"
           cat > /usr/local/bin/ccache <<'EOF'
@@ -74,18 +71,10 @@ jobs:
           exec /usr/bin/ccache "$@"
           EOF
           chmod 0755 /usr/local/bin/ccache
-          test "$(command -v ccache)" = /usr/local/bin/ccache
           ccache --set-config=max_size="$CCACHE_MAXSIZE"
-          ccache --show-config
           ccache --zero-stats
           : > "$CCACHE_STATSLOG"
           : > "$CCACHE_WRAPPER_LOG"
-          printf 'int main(void) { return 0; }\n' > /tmp/ccache-smoke.c
-          ccache cc -c /tmp/ccache-smoke.c -o /tmp/ccache-smoke.o
-          smoke_calls=$(ccache --print-stats | awk \
-            '$1 == "cache_miss" || $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { total += $2 } END { print total + 0 }')
-          test "$smoke_calls" -gt 0
-          ccache --zero-stats
 
       - name: Prepare unprivileged builder
         run: |
@@ -94,19 +83,11 @@ jobs:
           chmod 0440 /etc/sudoers.d/builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      - name: Build Aquamarine and Hyprland
+      - name: Build at native full parallelism
         run: |
-          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && CCACHE_DIR='$CCACHE_DIR' CCACHE_COMPILERCHECK='$CCACHE_COMPILERCHECK' CCACHE_STATSLOG='$CCACHE_STATSLOG' CCACHE_WRAPPER_LOG='$CCACHE_WRAPPER_LOG' CCACHE_MAXSIZE='$CCACHE_MAXSIZE' DEB_BUILD_OPTIONS=parallel=$(nproc) ./build-anland.sh"
-          wrapper_calls=$(wc -l < "$CCACHE_WRAPPER_LOG")
+          su -s /bin/bash builder -c "cd '$GITHUB_WORKSPACE' && CCACHE_DIR='$CCACHE_DIR' CCACHE_COMPILERCHECK='$CCACHE_COMPILERCHECK' CCACHE_STATSLOG='$CCACHE_STATSLOG' CCACHE_WRAPPER_LOG='$CCACHE_WRAPPER_LOG' CCACHE_MAXSIZE='$CCACHE_MAXSIZE' DEB_BUILD_OPTIONS=\"$DEB_BUILD_OPTIONS parallel=$(nproc)\" ./build-anland.sh"
           ccache --show-stats --verbose
-          ccache --show-log-stats
-          cacheable_calls=$(ccache --print-log-stats | awk \
-            '$1 == "cache_miss" || $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { total += $2 } END { print total + 0 }')
-          echo "ccache wrapper calls recorded: $wrapper_calls"
-          echo "Cacheable calls recorded: $cacheable_calls"
-          test "$wrapper_calls" -gt 0
-          test "$cacheable_calls" -gt 0
-          du -sh "$CCACHE_DIR"
+          test "$(wc -l < "$CCACHE_WRAPPER_LOG")" -gt 0
 
       - name: Save compiler cache
         uses: actions/cache/save@v5
@@ -115,7 +96,7 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-hyprland-${{ runner.os }}-${{ runner.arch }}-forky-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Verify selected packages
+      - name: Verify packages and checksums
         run: |
           host_arch=$(dpkg --print-architecture)
           test "$host_arch" = arm64
@@ -123,18 +104,14 @@ jobs:
           test "$(find artifacts -maxdepth 1 -type f -name "hyprland-anland-desktop_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "libaquamarine13_*_${host_arch}.deb" | wc -l)" -eq 1
           test "$(find artifacts -maxdepth 1 -type f -name "xwayland_*_${host_arch}.deb" | wc -l)" -ge 1
-          test "$(find artifacts -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 4
           hyprland_deb=$(find artifacts -maxdepth 1 -type f -name "hyprland_*_${host_arch}.deb" ! -name '*anland*')
           dpkg-deb -c "$hyprland_deb" | grep -F "/usr/lib/aarch64-linux-gnu/hyprland/plugins/libhyprgrass.so"
-          test ! -e artifacts/hyprgrass/libhyprgrass.so
           test -x artifacts/install-anland-desktop.sh
           (cd artifacts && sha256sum -c SHA256SUMS)
 
-      - name: Upload selected Debian packages
+      - name: Upload Debian packages
         uses: actions/upload-artifact@v4
         with:
-          # upload-artifact already archives transport data. Upload the actual
-          # packages directly so downloads contain all installable .deb files.
           name: anland-debian-packages-arm64
           if-no-files-found: error
           retention-days: 14

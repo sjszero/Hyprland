@@ -3,7 +3,6 @@
 #include "../../hyprctlCompat.hpp"
 #include <cstdint>
 #include <string>
-#include <format>
 #include <hyprutils/os/Process.hpp>
 #include <hyprutils/memory/WeakPtr.hpp>
 #include "../shared.hpp"
@@ -26,7 +25,7 @@ static std::string getCommandStdOut(std::string command) {
 }
 
 static void setWindowProp(const std::string& selector, const std::string& prop, const std::string& value) {
-    getFromSocket(std::format("/dispatch hl.dsp.window.set_prop({{ window = '{}', prop = '{}', value = '{}' }})", selector, prop, value));
+    getFromSocket("/dispatch hl.dsp.window.set_prop({ window = '" + selector + "', prop = '" + prop + "', value = '" + value + "' })");
 }
 
 TEST_CASE(hyprctlDevicesActiveLayoutIndex) {
@@ -35,9 +34,9 @@ TEST_CASE(hyprctlDevicesActiveLayoutIndex) {
 
     for (uint8_t i = 0; i < 3; i++) {
         // set layout
-        getFromSocket(std::format("/switchxkblayout all {}", i));
+        getFromSocket("/switchxkblayout all " + std::to_string(i));
         std::string devicesJson = getFromSocket("j/devices");
-        std::string expected    = std::format(R"("active_layout_index": {})", i);
+        std::string expected    = R"("active_layout_index": )" + std::to_string(i);
         // check layout index
         EXPECT_CONTAINS(devicesJson, expected);
     }

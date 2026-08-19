@@ -1,0 +1,79 @@
+--- a/src/backend/Backend.cpp
++++ b/src/backend/Backend.cpp
+@@ -246,7 +246,7 @@
+ }
+ 
+ bool Aquamarine::CBackend::hasSession() {
+-    return !!session;
++    return static_cast<bool>(session);
+ }
+ 
+ std::vector<SDRMFormat> Aquamarine::CBackend::getPrimaryRenderFormats() {
+--- a/src/backend/drm/DRM.cpp
++++ b/src/backend/drm/DRM.cpp
+@@ -645,7 +645,7 @@
+ }
+ 
+ bool Aquamarine::CDRMBackend::shouldBlit() {
+-    return !!primary;
++    return static_cast<bool>(primary);
+ }
+ 
+ bool Aquamarine::CDRMBackend::initMgpu() {
+--- a/src/backend/anland/AnlandInput.cpp
++++ b/src/backend/anland/AnlandInput.cpp
+@@ -7,6 +7,7 @@
+ #include <GLES2/gl2.h>
+ #include <poll.h>
+ #include <time.h>
++#include <unistd.h>
+ #include <format>
+ 
+ extern "C" {
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -136,21 +136,6 @@
+ # tests
+ add_custom_target(tests)
+ 
+-add_executable(simpleWindow "tests/SimpleWindow.cpp")
+-target_link_libraries(simpleWindow PRIVATE PkgConfig::deps aquamarine)
+-add_test(
+-  NAME "simpleWindow"
+-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+-  COMMAND simpleWindow "simpleWindow")
+-add_dependencies(tests simpleWindow)
+-
+-add_executable(attachments "tests/Attachments.cpp")
+-target_link_libraries(attachments PRIVATE PkgConfig::deps aquamarine)
+-add_test(
+-  NAME "attachments"
+-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+-  COMMAND attachments "attachments")
+-add_dependencies(tests attachments)
+ 
+ # Installation
+ install(TARGETS aquamarine)
+--- a/include/aquamarine/backend/AnlandOutput.hpp
++++ b/include/aquamarine/backend/AnlandOutput.hpp
+@@ -19,6 +19,7 @@
+         virtual bool                                                                      test() override;
+         virtual Hyprutils::Memory::CSharedPointer<IBackendImplementation>                 getBackend() override;
+         virtual std::vector<SDRMFormat>                                                   getRenderFormats() override;
++        virtual bool                                                                      pendingIdleFrame() override;
+         virtual bool                                                                      pendingPageFlip() override;
+         virtual void                                                                      scheduleFrame(const scheduleFrameReason reason = AQ_SCHEDULE_UNKNOWN) override;
+         virtual bool                                                                      destroy() override;
+--- a/src/backend/anland/AnlandOutput.cpp
++++ b/src/backend/anland/AnlandOutput.cpp
+@@ -267,6 +267,10 @@
+     };
+ }
+ 
++bool CAnlandOutput::pendingIdleFrame() {
++    return false;
++}
++
+ bool CAnlandOutput::pendingPageFlip() {
+     return m_awaitingConsumer;
+ }

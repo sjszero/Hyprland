@@ -54,8 +54,7 @@
 #include "../../managers/XWaylandManager.hpp"
 #include "../../render/Renderer.hpp"
 #include "../../render/transformer/MotionBlurTransformer.hpp"
-#include "../../ipc/s2/S2.hpp"
-#include "../../render/transformer/WobbleTransformer.hpp"
+#include "../../managers/EventManager.hpp"
 #include "../../managers/input/InputManager.hpp"
 #include "../../pointer/PointerController.hpp"
 #include "../../managers/KeybindManager.hpp"
@@ -577,8 +576,8 @@ void CWindow::moveToWorkspace(PHLWORKSPACE pWorkspace) {
     Desktop::globalWindowController()->updateAllWindowsDecorations();
 
     if (valid(pWorkspace)) {
-        IPC::Socket2::sock()->postEvent({.event = "movewindow", .data = std::format("{:x},{}", rc<uintptr_t>(this), pWorkspace->m_name)});
-        IPC::Socket2::sock()->postEvent({.event = "movewindowv2", .data = std::format("{:x},{},{}", rc<uintptr_t>(this), pWorkspace->m_id, pWorkspace->m_name)});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "movewindow", .data = std::format("{:x},{}", rc<uintptr_t>(this), pWorkspace->m_name)});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "movewindowv2", .data = std::format("{:x},{},{}", rc<uintptr_t>(this), pWorkspace->m_id, pWorkspace->m_name)});
         Event::bus()->m_events.window.moveToWorkspace.emit(m_self.lock(), pWorkspace);
     }
 
@@ -614,21 +613,24 @@ static Render::CMotionBlurTransformer* motionBlurTransformer(CWindow* window) {
     if (!window)
         return nullptr;
 
-    return window->m_transformers.get<Render::CMotionBlurTransformer>();
+    for (auto const& transformer : window->m_transformers) {
+        if (const auto MOTIONBLUR = dc<Render::CMotionBlurTransformer*>(transformer.get()))
+            return MOTIONBLUR;
+    }
+
+    return nullptr;
 }
 
 static const Render::CMotionBlurTransformer* motionBlurTransformer(const CWindow* window) {
     if (!window)
         return nullptr;
 
-    return window->m_transformers.get<Render::CMotionBlurTransformer>();
-}
+    for (auto const& transformer : window->m_transformers) {
+        if (const auto MOTIONBLUR = dc<const Render::CMotionBlurTransformer*>(transformer.get()))
+            return MOTIONBLUR;
+    }
 
-static Render::CWobbleTransformer* wobbleTransformer(CWindow* window) {
-    if (!window)
-        return nullptr;
-
-    return window->m_transformers.get<Render::CWobbleTransformer>();
+    return nullptr;
 }
 
 std::optional<MotionBlur::SState> CWindow::motionBlurState(bool allowStale) const {
@@ -672,7 +674,7 @@ void CWindow::recordMotionBlur(const CBox& previous, const CBox& current) {
 
     auto MOTIONBLUR = motionBlurTransformer(this);
     if (!MOTIONBLUR) {
-        m_transformers.emplace<Render::CMotionBlurTransformer>(m_self);
+        m_transformers.emplace_back(makeUnique<Render::CMotionBlurTransformer>(m_self));
         MOTIONBLUR = motionBlurTransformer(this);
     }
 
@@ -686,44 +688,14 @@ void CWindow::recordMotionBlur(const CBox& previous, const CBox& current) {
 void CWindow::resetMotionBlur() {
     damageMotionBlur(true);
 
-    if (auto MOTIONBLUR = motionBlurTransformer(this))
+    std::erase_if(m_transformers, [](auto const& transformer) {
+        const auto MOTIONBLUR = dc<Render::CMotionBlurTransformer*>(transformer.get());
+        if (!MOTIONBLUR)
+            return false;
+
         MOTIONBLUR->reset();
-
-    m_transformers.removeInactive();
-}
-
-void CWindow::resetWobble() {
-    if (auto WOBBLE = wobbleTransformer(this))
-        WOBBLE->resetWithDamage();
-
-    m_transformers.removeInactive();
-}
-
-void CWindow::onPositionUpdate(const CBox& previous, const CBox& current, eWindowUpdateSource source) {
-    recordMotionBlur(previous, current);
-
-    if (previous == current)
-        return;
-
-    if (!Render::CWobbleTransformer::shouldEnable(m_self.lock())) {
-        resetWobble();
-        return;
-    }
-
-    auto WOBBLE = wobbleTransformer(this);
-    if (!WOBBLE) {
-        m_transformers.emplace<Render::CWobbleTransformer>(m_self);
-        WOBBLE = wobbleTransformer(this);
-    }
-
-    std::optional<Vector2D> grabPoint;
-    if (source == WINDOW_UPDATE_MOUSE && current.w > 0.F && current.h > 0.F) {
-        const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
-        grabPoint        = Vector2D{std::clamp((MOUSE.x - current.x) / current.w, 0.0, 1.0), std::clamp((MOUSE.y - current.y) / current.h, 0.0, 1.0)};
-    }
-
-    if (WOBBLE)
-        WOBBLE->record(previous, current, grabPoint);
+        return true;
+    });
 }
 
 void CWindow::onUnmap() {
@@ -767,7 +739,6 @@ void CWindow::onUnmap() {
         PMONITOR->m_solitaryClient.reset();
 
     resetMotionBlur();
-    resetWobble();
 
     if (m_workspace) {
         m_workspace->updateWindows();
@@ -807,7 +778,6 @@ void CWindow::onMap() {
     alpha(WINDOW_ALPHA_MOVE_TO_WORKSPACE)->setValueAndWarp(1.F);
 
     resetMotionBlur();
-    resetWobble();
 
     if (m_borderAngleAnimationProgress->enabled()) {
         m_borderAngleAnimationProgress->setValueAndWarp(0.f);
@@ -1344,7 +1314,7 @@ std::unordered_map<std::string, std::string> CWindow::getEnv() {
 
 #if defined(__linux__)
     //
-    std::string   environFile = std::format("/proc/{}/environ", PID);
+    std::string   environFile = "/proc/" + std::to_string(PID) + "/environ";
     std::ifstream ifs(environFile, std::ios::binary);
 
     if (!ifs.good())
@@ -1398,7 +1368,7 @@ void CWindow::activate(bool force) {
 
     m_isUrgent = true;
 
-    IPC::Socket2::sock()->postEvent({.event = "urgent", .data = std::format("{:x}", rc<uintptr_t>(this))});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "urgent", .data = std::format("{:x}", rc<uintptr_t>(this))});
     Event::bus()->m_events.window.urgent.emit(m_self.lock());
 
     if (!force &&
@@ -1479,13 +1449,13 @@ void CWindow::onUpdateMeta() {
 
     if (m_title != NEWTITLE) {
         m_title = NEWTITLE;
-        IPC::Socket2::sock()->postEvent({.event = "windowtitle", .data = std::format("{:x}", rc<uintptr_t>(this))});
-        IPC::Socket2::sock()->postEvent({.event = "windowtitlev2", .data = std::format("{:x},{}", rc<uintptr_t>(this), m_title)});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "windowtitle", .data = std::format("{:x}", rc<uintptr_t>(this))});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "windowtitlev2", .data = std::format("{:x},{}", rc<uintptr_t>(this), m_title)});
         Event::bus()->m_events.window.title.emit(m_self.lock());
 
         if (m_self == Desktop::focusState()->window()) { // if it's the active, let's post an event to update others
-            IPC::Socket2::sock()->postEvent({.event = "activewindow", .data = std::format("{},{}", m_class, m_title)});
-            IPC::Socket2::sock()->postEvent({.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(this))});
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindow", .data = m_class + "," + m_title});
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(this))});
 
             // no need for a hook event
         }
@@ -1501,8 +1471,8 @@ void CWindow::onUpdateMeta() {
         Event::bus()->m_events.window.class_.emit(m_self.lock());
 
         if (m_self == Desktop::focusState()->window()) { // if it's the active, let's post an event to update others
-            IPC::Socket2::sock()->postEvent({.event = "activewindow", .data = std::format("{},{}", m_class, m_title)});
-            IPC::Socket2::sock()->postEvent({.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(this))});
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindow", .data = m_class + "," + m_title});
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "activewindowv2", .data = std::format("{:x}", rc<uintptr_t>(this))});
 
             // no need for a hook event
         }
@@ -2074,10 +2044,8 @@ static void setVector2DAnimToMove(WP<CBaseAnimatedVariable> pav) {
     if (animvar->m_Context.pWindow) {
         animvar->m_Context.pWindow->m_animatingIn = false;
 
-        if (!animvar->m_Context.pWindow->positionAnimation()->isBeingAnimated() && !animvar->m_Context.pWindow->sizeAnimation()->isBeingAnimated()) {
+        if (!animvar->m_Context.pWindow->positionAnimation()->isBeingAnimated() && !animvar->m_Context.pWindow->sizeAnimation()->isBeingAnimated())
             animvar->m_Context.pWindow->resetMotionBlur();
-            animvar->m_Context.pWindow->resetWobble();
-        }
     }
 }
 
@@ -2213,7 +2181,7 @@ void CWindow::mapWindow() {
 
             const auto JUSTWORKSPACE = WORKSPACERQ.contains(' ') ? WORKSPACERQ.substr(0, WORKSPACERQ.find_first_of(' ')) : WORKSPACERQ;
 
-            if (JUSTWORKSPACE == PWORKSPACE->m_name || JUSTWORKSPACE == std::format("name:{}", PWORKSPACE->m_name))
+            if (JUSTWORKSPACE == PWORKSPACE->m_name || JUSTWORKSPACE == "name:" + PWORKSPACE->m_name)
                 requestedWorkspace = "";
 
             Log::logger->log(Log::DEBUG, "Rule workspace matched by {}, {} applied.", m_self.lock(), m_ruleApplicator->static_.workspace);
@@ -2398,7 +2366,7 @@ void CWindow::mapWindow() {
     }
 
     // emit the IPC event before the layout might focus the window to avoid a focus event first
-    IPC::Socket2::sock()->postEvent({"openwindow", std::format("{:x},{},{},{}", m_self.lock(), PWORKSPACE->m_name, m_class, m_title)});
+    g_pEventManager->postEvent(SHyprIPCEvent{"openwindow", std::format("{:x},{},{},{}", m_self.lock(), PWORKSPACE->m_name, m_class, m_title)});
     Event::bus()->m_events.window.openEarly.emit(m_self.lock());
 
     if (*PAUTOGROUP                                                                        // auto_group enabled
@@ -2513,7 +2481,6 @@ void CWindow::mapWindow() {
         m_realPosition->warp();
         m_realSize->warp();
         resetMotionBlur();
-        resetWobble();
         if (requestedFSState.has_value()) {
             m_ruleApplicator->syncFullscreenOverride(Desktop::Types::COverridableVar(false, Desktop::Types::PRIORITY_WINDOW_RULE));
             Fullscreen::controller()->setFullscreenMode(m_self.lock(), requestedFSState.value().internal, requestedFSState.value().client, wasFullscreenLayoutHandled);
@@ -2604,7 +2571,7 @@ void CWindow::unmapWindow() {
     const auto PMONITOR = m_monitor.lock();
 
     m_events.unmap.emit();
-    IPC::Socket2::sock()->postEvent({"closewindow", std::format("{:x}", m_self.lock())});
+    g_pEventManager->postEvent(SHyprIPCEvent{"closewindow", std::format("{:x}", m_self.lock())});
     Event::bus()->m_events.window.close.emit(m_self.lock());
 
     if (m_isFloating && !m_isX11 && m_ruleApplicator->persistentSize().valueOrDefault()) {
@@ -2712,8 +2679,8 @@ void CWindow::unmapWindow() {
 
         // CWindow::onUnmap will remove this window's active status, but we can't really do it above.
         if (m_self.lock() == Desktop::focusState()->window() || !Desktop::focusState()->window()) {
-            IPC::Socket2::sock()->postEvent({"activewindow", ","});
-            IPC::Socket2::sock()->postEvent({"activewindowv2", ""});
+            g_pEventManager->postEvent(SHyprIPCEvent{"activewindow", ","});
+            g_pEventManager->postEvent(SHyprIPCEvent{"activewindowv2", ""});
 
             Event::bus()->m_events.window.active.emit(m_self.lock(), FOCUS_REASON_OTHER);
         }
@@ -2859,17 +2826,11 @@ void CWindow::onXDGMoveRequest(const SXDGToplevelMoveRequest&) {
     if (!m_isMapped || isHidden() || g_layoutManager->dragController()->target())
         return;
 
-    if (m_ruleApplicator->noXdgDrags().valueOrDefault())
-        return;
-
     g_layoutManager->beginDragTarget(layoutTarget(), MBIND_MOVE, std::nullopt, true);
 }
 
 void CWindow::onXDGResizeRequest(const SXDGToplevelResizeRequest& request) {
     if (!m_isMapped || isHidden() || g_layoutManager->dragController()->target())
-        return;
-
-    if (m_ruleApplicator->noXdgDrags().valueOrDefault())
         return;
 
     g_layoutManager->beginDragTarget(layoutTarget(), MBIND_RESIZE, xdgResizeEdgeToCorner(request.edges), true);

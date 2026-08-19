@@ -3,8 +3,6 @@
 #include "../../hyprctlCompat.hpp"
 #include "tests.hpp"
 
-#include <format>
-
 #include <hyprutils/utils/ScopeGuard.hpp>
 
 using namespace Hyprutils::Utils;
@@ -28,7 +26,7 @@ static std::string getClientBlock(const std::string& clients, const std::string&
         return NPOS;
     };
 
-    const std::string CLASS_TARGET = std::format("class: {}\n", cls);
+    const std::string CLASS_TARGET = "class: " + cls + "\n";
 
     // block by block till you find the class within a block
     size_t blockStart = findNextBlockHeader(clients, 0);
@@ -58,7 +56,7 @@ static bool spawnLayer(const std::string& namespace_, const std::vector<std::str
 // Taken from layers tests
 static std::string getLayerLine(const std::string& layers, const std::string& target) {
 
-    auto pos = layers.find(std::format("namespace: {}", target));
+    auto pos = layers.find("namespace: " + target);
     if (pos == std::string::npos)
         return "";
 
