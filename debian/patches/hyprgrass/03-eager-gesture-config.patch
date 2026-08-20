@@ -1,0 +1,146 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Tue, 19 Aug 2026 15:00:00 +0800
+Subject: [PATCH] hyprgrass: avoid lazy gesture config registration in touch callbacks
+
+Hyprland 0.56 populates Lua plugin configuration during config loading.
+Constructing CConfigValue from GestureManager::handleDragGesture can abort in
+local__configValuePopulate. Keep Lua internal-bind dispatch and disable the
+legacy workspace-swipe and border-resize bridge in this input callback.
+
+Forwarded: not-needed
+---
+Index: refresh-gesture-guard-tree/third_party/hyprgrass/src/GestureManager.cpp
+===================================================================
+--- refresh-gesture-guard-tree.orig/third_party/hyprgrass/src/GestureManager.cpp
++++ refresh-gesture-guard-tree/third_party/hyprgrass/src/GestureManager.cpp
+@@ -121,122 +121,17 @@ FindGestureResult GestureManager::handle
+ }
+ 
+ bool GestureManager::handleDragGesture(const DragGestureEvent& gev) {
+-    static auto const WORKSPACE_SWIPE_FINGERS = CConfigValue<Config::INTEGER>("plugin:hyprgrass:workspace_swipe_fingers");
+-    static auto const WORKSPACE_SWIPE_EDGE    = CConfigValue<std::string>("plugin:hyprgrass:workspace_swipe_edge");
+-    static auto const RESIZE_LONG_PRESS       = CConfigValue<Config::BOOL>("plugin:hyprgrass:resize_on_border_long_press");
+-
+-    static auto PBORDERSIZE       = CConfigValue<Config::INTEGER>("general:border_size");
+-    static auto PBORDERGRABEXTEND = CConfigValue<Config::INTEGER>("general:extend_border_grab_area");
+-    static auto PGAPSINDATA       = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+-
+     Log::logger->log(Log::DEBUG, "[hyprgrass] Drag gesture begin: {}", gev.to_string());
+ 
+-    auto const workspace_swipe_edge_str = *WORKSPACE_SWIPE_EDGE;
+-
+-    switch (gev.type) {
+-        case GestureType::SWIPE: {
+-            if (this->trackpadGestureBegin(gev))
+-                return true;
+-
+-            if (*WORKSPACE_SWIPE_FINGERS != gev.finger_count) {
+-                return false;
+-            }
+-
+-            if (this->handleWorkspaceSwipe(gev.direction))
+-                return true;
+-
+-            return false;
+-        }
+-
+-        case GestureType::EDGE_SWIPE: {
+-            if (workspace_swipe_edge_str == "l" && gev.edge_origin == GESTURE_DIRECTION_LEFT) {
+-                return this->handleWorkspaceSwipe(gev.direction);
+-            }
+-            if (workspace_swipe_edge_str == "r" && gev.edge_origin == GESTURE_DIRECTION_RIGHT) {
+-                return this->handleWorkspaceSwipe(gev.direction);
+-            }
+-            if (workspace_swipe_edge_str == "u" && gev.edge_origin == GESTURE_DIRECTION_UP) {
+-                return this->handleWorkspaceSwipe(gev.direction);
+-            }
+-            if (workspace_swipe_edge_str == "d" && gev.edge_origin == GESTURE_DIRECTION_DOWN) {
+-                return this->handleWorkspaceSwipe(gev.direction);
+-            }
+-
+-            if (this->trackpadGestureBegin(gev))
+-                return true;
+-
+-            return false;
+-        }
+-
+-        case GestureType::LONG_PRESS:
+-            if (g_pSessionLockManager->isSessionLocked()) {
+-                return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) !=
+-                       FindGestureResult::NONE;
+-            }
+-
+-            if (*RESIZE_LONG_PRESS && gev.finger_count == 1) {
+-                const auto BORDER_GRAB_AREA = *PBORDERSIZE + *PBORDERGRABEXTEND;
+-
+-                // kind of a hack: this is the window detected from previous touch events
+-                const auto w = g_pInputManager->m_foundWindowToFocus.lock();
+-                const Vector2D touchPos =
+-                    pixelPositionToPercentagePosition(this->m_sGestureState.get_center().current) *
+-                    this->m_lastTouchedMonitor->m_size;
+-                if (w && !Fullscreen::controller()->isFullscreen(w)) {
+-                    const Vector2D realPos  = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+-                    const Vector2D realSize = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+-                    const CBox real         = {realPos.x, realPos.y, realSize.x, realSize.y};
+-                    const CBox grab         = {
+-                        real.x - BORDER_GRAB_AREA, real.y - BORDER_GRAB_AREA, real.width + 2 * BORDER_GRAB_AREA,
+-                        real.height + 2 * BORDER_GRAB_AREA
+-                    };
+-
+-                    bool notInRealWindow = !real.containsPoint(touchPos) || w->isInCurvedCorner(touchPos.x, touchPos.y);
+-                    bool onTiledGap = !w->m_isFloating && !Fullscreen::controller()->isFullscreen(w) && notInRealWindow;
+-                    bool inGrabArea = notInRealWindow && grab.containsPoint(touchPos);
+-
+-                    if ((onTiledGap || inGrabArea) && !w->hasPopupAt(touchPos)) {
+-                        IPointer::SButtonEvent e = {
+-                            .timeMs = 0, // HACK: they don't use this :p
+-                            .button = 0,
+-                            .state  = WL_POINTER_BUTTON_STATE_PRESSED,
+-                        };
+-                        g_pKeybindManager->resizeWithBorder(e);
+-
+-                        auto oldGapsIn           = *static_cast<Config::CCssGapData*>(PGAPSINDATA.ptr());
+-                        this->resizeOnBorderInfo = {
+-                            .active      = true,
+-                            .old_gaps_in = oldGapsIn,
+-                        };
+-
+-                        Config::CCssGapData newGapsIn = oldGapsIn;
+-                        newGapsIn.m_top += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_right += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_bottom += RESIZE_BORDER_GAP_INCREMENT;
+-                        newGapsIn.m_left += RESIZE_BORDER_GAP_INCREMENT;
+-                        updateGapsIn(newGapsIn);
+-                        return true;
+-                    }
+-                }
+-            }
+-
+-            if (this->trackpadGestureBegin(gev))
+-                return true;
+-
+-            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) != FindGestureResult::NONE;
+-
+-        case GestureType::PINCH:
+-            if (this->trackpadGestureBegin(gev))
+-                return true;
+-
+-            return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) != FindGestureResult::NONE;
+-            break;
+-        case GestureType::TAP:
+-            // tap does not trigger drag
+-            break;
+-    }
++    // Hyprland 0.56's Lua configuration store only populates plugin values
++    // while configuration is loaded. Constructing CConfigValue from this input
++    // callback aborts in local__configValuePopulate. Touch gestures are declared
++    // through internalBinds, so leave the legacy workspace-swipe and border-resize
++    // bridge disabled instead of letting a gesture terminate the compositor.
++    if (this->trackpadGestureBegin(gev))
++        return true;
+ 
+-    return false;
++    return this->handleGestureBind(gev.to_string(), GestureEventType::DRAG_BEGIN) != FindGestureResult::NONE;
+ }
+ 
+ FindGestureResult GestureManager::findGestureBind(std::string bind, GestureEventType type) const {

@@ -14,82 +14,202 @@ cleanup() {
     for pid in $children; do
         kill "$pid" 2>/dev/null || true
     done
+    # The DMS launcher uses setsid, so its descendants are in a separate
+    # process group and must be terminated as a group.
+    if [ -n "${dms_group_pid:-}" ]; then
+        kill -TERM -- "-$dms_group_pid" 2>/dev/null || true
+    fi
+    # start-hyprland and the compositor share the watchdog process group.
+    # If DMS exits or the service shell receives a signal, killing only the
+    # watchdog can reparent Hyprland to PID 1.  Terminate the whole group
+    # while the group identity is still available.
+    if [ -n "${hyprland_pid:-}" ]; then
+        kill -TERM -- "-$hyprland_pid" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT HUP INT TERM
 
-start_if_missing() {
-    socket="$1"
-    shift
-    if [ -S "$socket" ]; then
-        return 0
+# PipeWire is a systemd --user session graph.  Do not launch daemons directly
+# from this desktop service: a direct launcher-owned graph races the socket-
+# activated user units, can be killed with the desktop cgroup, and causes DMS
+# startup to block while WirePlumber rebuilds devices.  Request the existing
+# user units without taking ownership; --no-block keeps compositor startup off
+# the audio manager's critical path.
+ensure_audio_session() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    if [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ]; then
+        systemctl --user start --no-block pipewire.socket pipewire.service 2>/dev/null || true
     fi
-    "$@" >/dev/null 2>&1 &
-    children="$children $!"
+    if ! pgrep -u "$(id -u)" -x wireplumber >/dev/null 2>&1; then
+        systemctl --user start --no-block wireplumber.service 2>/dev/null || true
+    fi
+    if command -v pipewire-pulse >/dev/null 2>&1 && [ ! -S "$XDG_RUNTIME_DIR/pulse/native" ]; then
+        systemctl --user start --no-block pipewire-pulse.socket pipewire-pulse.service 2>/dev/null || true
+    fi
 }
 
-# PipeWire is required by Aquamarine's Anland audio bridge.  Do not create a
-# second graph when a normal desktop session already provides one.
-start_if_missing "$XDG_RUNTIME_DIR/pipewire-0" pipewire
+ensure_audio_session
 
-for _ in $(seq 1 20); do
-    [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break
-    sleep 0.05
-done
+# A socket node can appear before Hyprland has started accepting clients.
+# Checking -S alone races compositor initialization and makes DMS/Quickshell
+# exit permanently on ECONNREFUSED. A successful local connect is enough here;
+# no Wayland protocol request is sent.
+wayland_socket_ready() {
+    python3 - "$1" <<'PY'
+import socket
+import sys
 
-if ! pgrep -u "$(id -u)" -x wireplumber >/dev/null 2>&1; then
-    wireplumber >/dev/null 2>&1 &
-    children="$children $!"
-fi
-
-# Pulse compatibility is optional; avoid duplicating a daemon supplied by the
-# host session.
-if command -v pipewire-pulse >/dev/null 2>&1 && [ ! -S "$XDG_RUNTIME_DIR/pulse/native" ]; then
-    pipewire-pulse >/dev/null 2>&1 &
-    children="$children $!"
-fi
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+}
 
 # DMS is supplied by the official AvengeMedia package. It is the session
 # shell: its normal Logout must end Hyprland too, and Hyprland shutdown must
 # terminate DMS helpers together with the DMS process group.
+# A crashed session can leave old instance directories behind.  DMS must bind
+# only to an IPC socket created after this launcher began, and only after that
+# socket accepts a connection.
+instance_seen_before_start() {
+    case "
+${hypr_instances_before_start}
+" in
+        *"
+$1
+"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+hypr_ipc_ready() {
+    python3 - "$1" <<'PYTHON'
+import socket
+import sys
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PYTHON
+}
+
+find_new_hypr_instance() {
+    wayland_name=$1
+    for instance_dir in "$XDG_RUNTIME_DIR"/hypr/*; do
+        [ -d "$instance_dir" ] || continue
+        signature=${instance_dir##*/}
+        instance_seen_before_start "$signature" && continue
+        [ -f "$instance_dir/hyprland.lock" ] || continue
+        instance_wayland=$(sed -n '2p' "$instance_dir/hyprland.lock" 2>/dev/null || true)
+        [ "$instance_wayland" = "$wayland_name" ] || continue
+        hypr_ipc_ready "$instance_dir/.socket.sock" || continue
+        printf '%s\n' "$signature"
+        return 0
+    done
+    return 1
+}
+
 start_dms() {
+
     dms_pid=""
+    dms_group_pid=""
     cleanup_dms() {
+        if [ -n "$dms_group_pid" ]; then
+            kill -TERM -- "-$dms_group_pid" 2>/dev/null || true
+        fi
         if [ -n "$dms_pid" ]; then
-            kill -TERM -- "-$dms_pid" 2>/dev/null || true
             wait "$dms_pid" 2>/dev/null || true
         fi
+        dms_pid=""
+        dms_group_pid=""
     }
     trap cleanup_dms EXIT HUP INT TERM
 
+    # Hyprland may create the Wayland node before its instance directory and
+    # IPC socket are ready.  Keep looking for the new instance for 20 seconds
+    # instead of giving up after the old 5-second window.
     i=0
-    while [ "$i" -lt 100 ]; do
+    while [ "$i" -lt 200 ]; do
         for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
             [ -S "$socket" ] || continue
-            for instance_dir in "$XDG_RUNTIME_DIR"/hypr/*; do
-                [ -d "$instance_dir" ] || continue
-                signature=${instance_dir##*/}
-                setsid env \
-                    WAYLAND_DISPLAY="${socket##*/}" \
-                    HYPRLAND_INSTANCE_SIGNATURE="$signature" \
-                    QT_QPA_PLATFORM=wayland \
-                    dms run --session &
-                dms_pid=$!
-                if wait "$dms_pid"; then
-                    dms_status=0
-                else
-                    dms_status=$?
-                fi
-                dms_pid=""
-                # DMS Logout is the requested end of this desktop session.
-                kill -TERM "$hyprland_pid" 2>/dev/null || true
-                return "$dms_status"
+            wayland_socket_ready "$socket" || continue
+            signature=$(find_new_hypr_instance "${socket##*/}" || true)
+            [ -n "$signature" ] || continue
+            printf '%s\n' "start-hyprland-anland: starting DMS for Hyprland instance $signature" >&2
+            setsid env \
+                WAYLAND_DISPLAY="${socket##*/}" \
+                HYPRLAND_INSTANCE_SIGNATURE="$signature" \
+                QT_QPA_PLATFORM=wayland \
+                dms run --session &
+            dms_pid=$!
+            dms_group_pid=$dms_pid
+            dms_socket="$XDG_RUNTIME_DIR/danklinux-$dms_pid.sock"
+            # A DMS process can exit during Quickshell initialization.  Do not
+            # interpret that early startup failure as Logout; retry the shell
+            # while Hyprland is still alive.  The socket is the DMS readiness
+            # point and is created before the normal session can be logged out.
+            ready=0
+            j=0
+            while [ "$j" -lt 100 ]; do
+                [ -S "$dms_socket" ] && { ready=1; break; }
+                kill -0 "$dms_pid" 2>/dev/null || break
+                sleep 0.05
+                j=$((j + 1))
             done
+            if [ "$ready" -eq 0 ]; then
+                if kill -0 "$dms_pid" 2>/dev/null; then
+                    printf '%s\n' 'start-hyprland-anland: DMS readiness timeout; retrying' >&2
+                else
+                    printf '%s\n' 'start-hyprland-anland: DMS exited during startup; retrying' >&2
+                fi
+                cleanup_dms
+                i=$((i + 1))
+                sleep 0.1
+                continue
+            fi
+            if wait "$dms_pid"; then
+                dms_status=0
+            else
+                dms_status=$?
+            fi
+            # DMS may have exited while Quickshell helpers remain in its
+            # setsid process group.  Terminate that group before forgetting its PID.
+            cleanup_dms
+            # DMS Logout is the requested end of this desktop session.
+            # The watchdog and compositor are in the same process group on
+            # current start-hyprland builds.  Kill the group first; killing
+            # only the watchdog leaves Hyprland reparented to PID 1.
+            kill -TERM -- "-$hyprland_pid" 2>/dev/null || true
+            kill -TERM "$hyprland_pid" 2>/dev/null || true
+            # start-hyprland is a watchdog; explicitly terminate any direct
+            # compositor child as a fallback for older watchdog builds.
+            for child in $(pgrep -P "$hyprland_pid" 2>/dev/null || true); do
+                kill -TERM "$child" 2>/dev/null || true
+            done
+            return "$dms_status"
         done
         i=$((i + 1))
         sleep 0.05
     done
     echo "start-hyprland-anland: DMS was not started because the Hyprland session was not ready" >&2
 }
+
+# Record every pre-existing name before creating this session.  The DMS startup
+# worker will only select an instance that appears after this point.
+hypr_instances_before_start=""
+for instance_dir in "$XDG_RUNTIME_DIR"/hypr/*; do
+    [ -d "$instance_dir" ] || continue
+    hypr_instances_before_start="${hypr_instances_before_start}
+${instance_dir##*/}"
+done
 
 /usr/bin/start-hyprland --anland "$@" &
 hyprland_pid=$!
@@ -100,4 +220,3 @@ else
     echo "start-hyprland-anland: official dms package is unavailable; starting compositor only" >&2
 fi
 wait "$hyprland_pid"
-exit $?

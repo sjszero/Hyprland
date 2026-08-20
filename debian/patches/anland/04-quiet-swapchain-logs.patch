@@ -6,10 +6,10 @@ Drops the per-frame DEBUG log in CMonitorState::ensureBufferPresent() to reduce
 hot-path overhead in Anland sessions.
 
 ---
-Index: anland-quilt4/src/output/Monitor.cpp
+Index: src/output/Monitor.cpp
 ===================================================================
---- anland-quilt4.orig/src/output/Monitor.cpp
-+++ anland-quilt4/src/output/Monitor.cpp
+--- a/src/output/Monitor.cpp
++++ b/src/output/Monitor.cpp
 @@ -2664,7 +2664,7 @@ void CMonitorState::ensureBufferPresent(
  
      // this is required for modesetting being possible and might be missing in case of first tests in the renderer

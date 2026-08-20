@@ -1,7 +1,7 @@
-Index: Hyprland-local-test/src/output/Monitor.cpp
+Index: src/output/Monitor.cpp
 ===================================================================
---- Hyprland-local-test.orig/src/output/Monitor.cpp
-+++ Hyprland-local-test/src/output/Monitor.cpp
+--- a/src/output/Monitor.cpp
++++ b/src/output/Monitor.cpp
 @@ -230,13 +230,14 @@ void CMonitor::onConnect(bool noRule) {
  
          const auto SIZE = event.size;

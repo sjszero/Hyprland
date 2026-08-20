@@ -27,6 +27,7 @@ override_dh_auto_configure:
 # package. build-anland.sh imports it only into the native staging tree.
 override_dh_auto_install:
 	dh_auto_install
+	install -D -m 0755 debian/anland/start-hyprland-anland debian/tmp/usr/bin/start-hyprland-anland
 	ln -sfn . hyprland
 	PKG_CONFIG_LIBDIR=/usr/lib/${DEB_HOST_MULTIARCH}/pkgconfig:/usr/share/pkgconfig \
 		HYPRLAND_HEADERS=$(CURDIR) \

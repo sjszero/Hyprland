@@ -1,0 +1,60 @@
+Index: src/output/Monitor.hpp
+===================================================================
+--- a/src/output/Monitor.hpp
++++ b/src/output/Monitor.hpp
+@@ -91,8 +91,9 @@ namespace Monitor {
+         SP<Aquamarine::IOutput>     m_output;
+         float                       m_refreshRate     = 60; // Hz
+         int                         m_forceFullFrames = 0;
+-        bool                        m_scheduledRecalc = false;
+-        wl_output_transform         m_transform       = WL_OUTPUT_TRANSFORM_NORMAL;
++        bool                        m_scheduledRecalc         = false;
++        bool                        m_scheduledGeometryRecalc = false;
++        wl_output_transform         m_transform               = WL_OUTPUT_TRANSFORM_NORMAL;
+         float                       m_xwaylandScale   = 1.f;
+ 
+         std::optional<Vector2D>     m_forceSize;
+Index: src/output/Monitor.cpp
+===================================================================
+--- a/src/output/Monitor.cpp
++++ b/src/output/Monitor.cpp
+@@ -1082,17 +1082,23 @@ bool CMonitor::applyMonitorRule(Config::
+         m_background.reset();
+         m_splash.reset();
+ 
+-        // Schedule the normal layer arrangement after the output commit. This
+-        // avoids protocol re-entry from the backend state callback.
+-        g_pEventLoopManager->doLater([self = m_self] {
+-            const auto monitor = self.lock();
+-            if (!monitor || !monitor->m_output)
+-                return;
++        // Coalesce replacement buffers delivered in the same rotation burst.
++        // Arrange layers once after the output commit and use the existing
++        // render-frame recalc path for workspace layout.
++        if (!m_scheduledGeometryRecalc) {
++            m_scheduledGeometryRecalc = true;
++            g_pEventLoopManager->doLater([self = m_self] {
++                const auto monitor = self.lock();
++                if (!monitor || !monitor->m_output)
++                    return;
++
++                monitor->m_scheduledGeometryRecalc = false;
++                g_pHyprRenderer->arrangeLayersForMonitor(monitor->m_id);
++                monitor->m_scheduledRecalc = true;
++                g_pHyprRenderer->damageMonitor(monitor);
++            });
++        }
+ 
+-            g_pHyprRenderer->arrangeLayersForMonitor(monitor->m_id);
+-            g_layoutManager->recalculateMonitor(monitor);
+-            g_pHyprRenderer->damageMonitor(monitor);
+-        });
+     }
+ 
+     updateVCGTRamps();
+@@ -2836,4 +2842,4 @@ bool CMonitor::trySetFormat(std::span<co
+         }
+     }
+     return false;
+-}
++}

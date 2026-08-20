@@ -5,10 +5,10 @@ Subject: config: Use normal Hyprland config and log paths in Anland sessions
 Split from the Anland Hyprland integration series for reviewable, independently revertible changes.
 
 ---
-Index: Hyprland-local-test/src/config/supplementary/jeremy/Jeremy.cpp
+Index: src/config/supplementary/jeremy/Jeremy.cpp
 ===================================================================
---- Hyprland-local-test.orig/src/config/supplementary/jeremy/Jeremy.cpp
-+++ Hyprland-local-test/src/config/supplementary/jeremy/Jeremy.cpp
+--- a/src/config/supplementary/jeremy/Jeremy.cpp
++++ b/src/config/supplementary/jeremy/Jeremy.cpp
 @@ -32,15 +32,15 @@ std::expected<SConfigStateReply, std::st
          if (const auto CFG_ENV = getenv("HYPRLAND_CONFIG"); CFG_ENV)
              return SConfigStateReply{.path = CFG_ENV, .type = CONFIG_TYPE_EXPLICIT};
@@ -28,10 +28,10 @@ Index: Hyprland-local-test/src/config/supplementary/jeremy/Jeremy.cpp
              return SConfigStateReply{.path = CONFIGPATH, .type = CONFIG_TYPE_REGULAR};
          } else
              return std::unexpected("Neither HOME nor XDG_CONFIG_HOME are set in the environment. Could not find config in XDG_CONFIG_DIRS or /etc/xdg.");
-Index: Hyprland-local-test/src/debug/log/Logger.cpp
+Index: src/debug/log/Logger.cpp
 ===================================================================
---- Hyprland-local-test.orig/src/debug/log/Logger.cpp
-+++ Hyprland-local-test/src/debug/log/Logger.cpp
+--- a/src/debug/log/Logger.cpp
++++ b/src/debug/log/Logger.cpp
 @@ -26,7 +26,7 @@ void CLogger::log(Hyprutils::CLI::eLogLe
  
  void CLogger::initIS(const std::string_view& IS) {

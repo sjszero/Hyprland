@@ -1,0 +1,59 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Wed, 19 Aug 2026 17:55:00 +0800
+Subject: [PATCH] hyprgrass: restrict completed gesture precheck to plugin binds
+
+Completed touchscreen gestures are reserved before dispatch. The Anland profile
+uses Lua hyprgrass.bind entries stored in GestureManager::internalBinds, but the
+precheck also traversed Hyprland's global keybind vector. A target crash showed
+an invalid global bind entry being dereferenced in that input callback. Reserve
+only plugin-owned binds; retain global keybind compatibility in the subsequent
+drag-dispatch path.
+
+Forwarded: not-needed
+---
+Index: third_party/hyprgrass/src/GestureManager.cpp
+===================================================================
+--- a/third_party/hyprgrass/src/GestureManager.cpp
++++ b/third_party/hyprgrass/src/GestureManager.cpp
+@@ -140,27 +140,24 @@ FindGestureResult GestureManager::findGe
+     auto result     = FindGestureResult::NONE;
+     const auto MODS = g_pInputManager->getModsFromAllKBs();
+ 
+-    // Do not materialize std::array{m_keybinds, internalBinds}: CTAD copies both
+-    // vectors and allocates during the touch input callback. On constrained Anland
+-    // targets that allocation can throw before a completed gesture is dispatched.
+-    const auto findIn = [&](const auto& binds) {
+-        for (const auto& k : binds) {
+-            if (k->key != bind || k->handler == "pass" || k->locked != g_pSessionLockManager->isSessionLocked() ||
+-                k->modmask != MODS)
+-                continue;
++    // This is only a reservation precheck for completed touchscreen gestures.
++    // Lua hyprgrass.bind registrations live in internalBinds; do not inspect the
++    // compositor keybind vector from the Anland input callback. That vector is
++    // outside the plugin's reload lifetime and has produced invalid entries while
++    // a completed gesture is being reserved. handleGestureBind still retains the
++    // legacy global-keybind dispatch path for drag gestures.
++    for (const auto& k : this->internalBinds) {
++        if (!k || k->key != bind || k->handler == "pass" || k->locked != g_pSessionLockManager->isSessionLocked() ||
++            k->modmask != MODS)
++            continue;
+ 
+-            if (k->nonConsuming) {
+-                result = FindGestureResult::NON_CONSUMING;
+-                continue;
+-            }
+-
+-            return true;
++        if (k->nonConsuming) {
++            result = FindGestureResult::NON_CONSUMING;
++            continue;
+         }
+-        return false;
+-    };
+ 
+-    if (findIn(g_pKeybindManager->m_keybinds) || findIn(this->internalBinds))
+         return FindGestureResult::FOUND;
++    }
+ 
+     return result;
+ }

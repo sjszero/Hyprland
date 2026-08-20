@@ -5,10 +5,10 @@ Add Anland backend selection logic (AQ_BACKEND_ANLAND mandatory + HEADLESS fallb
 CAnlandClipboardSource class for non-blocking poll-based clipboard relay,
 and --anland CLI flag.
 ---
-Index: anland-quilt4/src/Compositor.cpp
+Index: src/Compositor.cpp
 ===================================================================
---- anland-quilt4.orig/src/Compositor.cpp
-+++ anland-quilt4/src/Compositor.cpp
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
 @@ -25,6 +25,10 @@
  #include "state/MonitorState.hpp"
  #include "state/WorkspaceState.hpp"
@@ -393,10 +393,10 @@ Index: anland-quilt4/src/Compositor.cpp
  void CCompositor::initManagers(eManagersInitStage stage) {
      switch (stage) {
          case STAGE_PRIORITY: {
-Index: anland-quilt4/src/Compositor.hpp
+Index: src/Compositor.hpp
 ===================================================================
---- anland-quilt4.orig/src/Compositor.hpp
-+++ anland-quilt4/src/Compositor.hpp
+--- a/src/Compositor.hpp
++++ b/src/Compositor.hpp
 @@ -17,6 +17,7 @@
  #include "helpers/cm/ColorManagement.hpp"
  
@@ -423,10 +423,10 @@ Index: anland-quilt4/src/Compositor.hpp
      Hyprutils::OS::CFileDescriptor m_watchdogWriteFd;
  
      struct {
-Index: anland-quilt4/src/main.cpp
+Index: src/main.cpp
 ===================================================================
---- anland-quilt4.orig/src/main.cpp
-+++ anland-quilt4/src/main.cpp
+--- a/src/main.cpp
++++ b/src/main.cpp
 @@ -32,6 +32,7 @@ static void help() {
      --socket NAME                - Sets the Wayland socket name (for Wayland socket handover)
      --wayland-fd FD              - Sets the Wayland socket fd (for Wayland socket handover)
@@ -445,10 +445,10 @@ Index: anland-quilt4/src/main.cpp
              } else if (value == "--watchdog-fd") {
                  if (std::next(it) == args.end()) {
                      help();
-Index: anland-quilt4/src/managers/SeatManager.cpp
+Index: src/managers/SeatManager.cpp
 ===================================================================
---- anland-quilt4.orig/src/managers/SeatManager.cpp
-+++ anland-quilt4/src/managers/SeatManager.cpp
+--- a/src/managers/SeatManager.cpp
++++ b/src/managers/SeatManager.cpp
 @@ -656,6 +656,11 @@ void CSeatManager::setCurrentSelection(S
      }
  

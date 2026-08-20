@@ -9,10 +9,10 @@ installed hyprland.pc dependency.
 
 Forwarded: not-needed
 ---
-Index: Hyprland-local-test/third_party/hyprgrass/meson.build
+Index: third_party/hyprgrass/meson.build
 ===================================================================
---- Hyprland-local-test.orig/third_party/hyprgrass/meson.build
-+++ Hyprland-local-test/third_party/hyprgrass/meson.build
+--- a/third_party/hyprgrass/meson.build
++++ b/third_party/hyprgrass/meson.build
 @@ -25,6 +25,8 @@ if not hyprland_headers.found()
    endif
  
@@ -28,4 +28,3 @@ Index: Hyprland-local-test/third_party/hyprgrass/meson.build
  subdir('examples')
 -subdir('src')
 +subdir('src')
-\ 文件末尾没有换行符

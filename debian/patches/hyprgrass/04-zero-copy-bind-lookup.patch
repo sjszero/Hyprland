@@ -1,0 +1,168 @@
+From: Anland packaging maintainers <packaging@anland.invalid>
+Date: Wed, 19 Aug 2026 16:50:00 +0800
+Subject: [PATCH] hyprgrass: avoid copying bind containers in touch callbacks
+
+Hyprgrass previously constructed std::array from the compositor keybind vector
+and plugin internal bind vector on every completed or dispatched touch gesture.
+That copies both vectors and may allocate in the Anland input callback, where the
+target has observed std::bad_alloc in findGestureBind. Iterate both containers
+directly, preserving lookup order and non-consuming bind semantics.
+
+Forwarded: not-needed
+---
+Index: third_party/hyprgrass/src/GestureManager.cpp
+===================================================================
+--- a/third_party/hyprgrass/src/GestureManager.cpp
++++ b/third_party/hyprgrass/src/GestureManager.cpp
+@@ -137,31 +137,31 @@ bool GestureManager::handleDragGesture(c
+ FindGestureResult GestureManager::findGestureBind(std::string bind, GestureEventType type) const {
+     Log::logger->log(Log::DEBUG, "[hyprgrass] Looking for binds matching: {}", bind);
+ 
+-    auto result = FindGestureResult::NONE;
+-
+-    auto allBinds   = std::ranges::views::join(std::array{g_pKeybindManager->m_keybinds, this->internalBinds});
++    auto result     = FindGestureResult::NONE;
+     const auto MODS = g_pInputManager->getModsFromAllKBs();
+ 
+-    for (const auto& k : allBinds) {
+-        if (k->key != bind)
+-            continue;
+-
+-        if (k->handler == "pass")
+-            continue;
+-
+-        if (k->locked != g_pSessionLockManager->isSessionLocked())
+-            continue;
+-
+-        if (k->modmask != MODS)
+-            continue;
+-
+-        if (k->nonConsuming) {
+-            result = FindGestureResult::NON_CONSUMING;
+-            continue;
++    // Do not materialize std::array{m_keybinds, internalBinds}: CTAD copies both
++    // vectors and allocates during the touch input callback. On constrained Anland
++    // targets that allocation can throw before a completed gesture is dispatched.
++    const auto findIn = [&](const auto& binds) {
++        for (const auto& k : binds) {
++            if (k->key != bind || k->handler == "pass" || k->locked != g_pSessionLockManager->isSessionLocked() ||
++                k->modmask != MODS)
++                continue;
++
++            if (k->nonConsuming) {
++                result = FindGestureResult::NON_CONSUMING;
++                continue;
++            }
++
++            return true;
+         }
++        return false;
++    };
+ 
++    if (findIn(g_pKeybindManager->m_keybinds) || findIn(this->internalBinds))
+         return FindGestureResult::FOUND;
+-    }
++
+     return result;
+ }
+ 
+@@ -171,61 +171,52 @@ FindGestureResult GestureManager::handle
+     auto found = FindGestureResult::NONE;
+     Log::logger->log(Log::DEBUG, "[hyprgrass] Looking for binds matching: {}", bind);
+ 
+-    auto allBinds   = std::ranges::views::join(std::array{g_pKeybindManager->m_keybinds, this->internalBinds});
+     const auto MODS = g_pInputManager->getModsFromAllKBs();
+ 
+-    for (const auto& k : allBinds) {
+-        if (k->key != bind)
+-            continue;
+-
+-        if (k->handler == "pass")
+-            continue;
+-
+-        if (k->locked != g_pSessionLockManager->isSessionLocked())
+-            continue;
+-
+-        if (k->modmask != MODS)
+-            continue;
+-
+-        // Should never happen, as we check in the ConfigManager, but oh well
+-        const auto ref = Hyprutils::String::strToNumber<int>(k->arg);
+-        if (k->handler != "__lua" || !ref) {
+-            Log::logger->log(Log::ERR, "Invalid handler in a keybind! (handler {} is not a lua function)", k->handler);
+-            continue;
+-        }
++    // See findGestureBind: the input callback must not copy and allocate for both
++    // bind vectors before dispatching a gesture action.
++    const auto handleIn = [&](const auto& binds) {
++        for (const auto& k : binds) {
++            if (k->key != bind || k->handler == "pass" || k->locked != g_pSessionLockManager->isSessionLocked() ||
++                k->modmask != MODS)
++                continue;
++
++            // Should never happen, as we check in the ConfigManager, but oh well
++            const auto ref = Hyprutils::String::strToNumber<int>(k->arg);
++            if (k->handler != "__lua" || !ref) {
++                Log::logger->log(Log::ERR, "Invalid handler in a keybind! (handler {} is not a lua function)", k->handler);
++                continue;
++            }
+ 
+-        auto luaMgr = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
++            auto luaMgr = dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
+ 
+-        switch (type) {
+-            case GestureEventType::COMPLETED:
+-                // mouse dispatchers only trigger on drag begin/end
+-                if (!k->mouse) {
+-                    Log::logger->log(Log::DEBUG, "[hyprgrass] calling dispatcher ({})", bind);
++            switch (type) {
++                case GestureEventType::COMPLETED:
++                    // mouse dispatchers only trigger on drag begin/end
++                    if (!k->mouse) {
++                        Log::logger->log(Log::DEBUG, "[hyprgrass] calling dispatcher ({})", bind);
++                        luaMgr->callLuaFn(*ref);
++                        found = std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
++                    }
++                    break;
++
++                default: {
++                    if (!k->mouse)
++                        continue;
++
++                    bool pressed          = type == GestureEventType::DRAG_BEGIN;
++                    this->mouseBindActive = pressed;
++                    Config::Actions::state()->m_passPressed = static_cast<int>(pressed);
+                     luaMgr->callLuaFn(*ref);
+-                    found =
+-                        std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
++                    Config::Actions::state()->m_passPressed = -1;
++                    found = std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
+                 }
+-                break;
+-
+-            default: {
+-                if (!k->mouse) {
+-                    // only mouse actions are considered on drag begin/end
+-                    continue;
+-                }
+-
+-                bool pressed          = type == GestureEventType::DRAG_BEGIN;
+-                this->mouseBindActive = pressed;
+-                // yes this is how the lua dispatcher detects key press state
+-                Config::Actions::state()->m_passPressed = static_cast<int>(pressed);
+-
+-                luaMgr->callLuaFn(*ref);
+-
+-                Config::Actions::state()->m_passPressed = -1;
+-
+-                found = std::max(found, k->nonConsuming ? FindGestureResult::NON_CONSUMING : FindGestureResult::FOUND);
+             }
+         }
+-    }
++    };
++
++    handleIn(g_pKeybindManager->m_keybinds);
++    handleIn(this->internalBinds);
+ 
+     return found;
+ }
